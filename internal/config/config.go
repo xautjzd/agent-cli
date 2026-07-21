@@ -1,0 +1,601 @@
+// Package config loads CLI configuration with a layered precedence chain
+// modeled on Claude Code / codex / opencode:
+//
+//	command-line flags > environment variables > project config
+//	(<project>/.agent/config.json) > global config (~/.agent/config.json)
+//	> defaults
+//
+// Named provider profiles (the "providers" map) let any OpenAI-compatible
+// endpoint be addressed by name, codex-style.
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/xautjzd/agent-cli/internal/catalog"
+	"github.com/xautjzd/agent-cli/internal/home"
+	"github.com/xautjzd/agent-cli/internal/provider"
+)
+
+// ProviderConfig is one named provider profile, e.g.
+//
+//	"providers": {
+//	  "ollama": {"base_url": "http://localhost:11434/v1", "model": "qwen3", "api_key": "ollama"},
+//	  "moonshot": {"base_url": "https://api.moonshot.cn/v1", "env_key": "MOONSHOT_API_KEY"}
+//	}
+type ProviderConfig struct {
+	BaseURL string `json:"base_url"`
+	Model   string `json:"model,omitempty"`
+	APIKey  string `json:"api_key,omitempty"`
+	// EnvKey names an environment variable to read the API key from,
+	// keeping secrets out of the file (codex-style).
+	EnvKey string `json:"env_key,omitempty"`
+	// Vision marks the profile's models as image-capable when automatic
+	// model-name detection cannot recognize them.
+	Vision bool `json:"vision,omitempty"`
+	// Format selects the wire protocol the endpoint speaks: "openai"
+	// (default) or "anthropic" for an Anthropic-compatible gateway.
+	Format string `json:"format,omitempty"`
+	// Auth selects how the credential is presented: "api_key" sends the
+	// x-api-key header (Anthropic's own default), "bearer" sends
+	// Authorization: Bearer, which most third-party gateways expect.
+	Auth string `json:"auth,omitempty"`
+}
+
+// Config is the resolved runtime configuration.
+type Config struct {
+	// Provider selects the vendor: "openai", "deepseek", "custom", or the
+	// name of an entry in Providers.
+	Provider string `json:"provider"`
+	// Model is the model identifier, e.g. "gpt-4o" or "deepseek-chat".
+	Model string `json:"model"`
+	// APIKey authenticates against the provider. Prefer setting it via
+	// environment variable over storing it in the config file.
+	APIKey string `json:"api_key,omitempty"`
+	// BaseURL overrides the provider's default endpoint (required for
+	// provider "custom").
+	BaseURL string `json:"base_url,omitempty"`
+	// MaxTurns bounds the tool-use loop per user message.
+	MaxTurns int `json:"max_turns,omitempty"`
+	// PermissionMode is the startup permission mode: "hitl" (default) or
+	// "bypass".
+	PermissionMode string `json:"permission_mode,omitempty"`
+	// GoalMaxRounds caps /goal work-check rounds per trigger (default 8).
+	GoalMaxRounds int `json:"goal_max_rounds,omitempty"`
+	// Thinking controls extended thinking on providers that support it
+	// (Anthropic): "off" disables it; empty uses the provider default.
+	Thinking string `json:"thinking,omitempty"`
+	// VisionProvider/VisionModel name a fallback used to describe images
+	// when the primary model has no vision support: the image turn is
+	// pre-processed by this model and the description is fed to the
+	// primary model as text.
+	VisionProvider string `json:"vision_provider,omitempty"`
+	VisionModel    string `json:"vision_model,omitempty"`
+	// AutoCompact controls automatic context compaction: "on" (default)
+	// summarizes older turns when the context nears ContextLimit; "off"
+	// disables it (manual /compact still works).
+	AutoCompact string `json:"auto_compact,omitempty"`
+	// ContextLimit is the model's usable context window in tokens; auto
+	// compaction triggers once occupancy passes a fraction of it. 0 uses a
+	// conservative default.
+	ContextLimit int `json:"context_limit,omitempty"`
+	// Providers holds named provider profiles for any OpenAI-compatible
+	// endpoint.
+	Providers map[string]ProviderConfig `json:"providers,omitempty"`
+	// MCPServers declares Model Context Protocol servers whose tools are
+	// merged into the agent's tool set at startup, keyed by a short server
+	// name (Claude Code's "mcpServers" convention).
+	MCPServers map[string]MCPServerConfig `json:"mcpServers,omitempty"`
+	// Subagents declares custom subagent types the "task" tool can delegate
+	// to, keyed by type name. The built-in general-purpose type is always
+	// available.
+	Subagents map[string]SubagentConfig `json:"subagents,omitempty"`
+}
+
+// SubagentConfig defines one custom subagent type (see the subagent package).
+type SubagentConfig struct {
+	// Description tells the model when to use this subagent type.
+	Description string `json:"description,omitempty"`
+	// Prompt is the subagent's system prompt (its role and instructions).
+	Prompt string `json:"prompt"`
+	// Tools optionally restricts the subagent to these tool names; empty
+	// means all available tools (except "task").
+	Tools []string `json:"tools,omitempty"`
+}
+
+// MCPServerConfig describes one Model Context Protocol server. Two transports
+// are supported, distinguished by Type (or inferred from the fields present):
+//
+//	stdio: {"command": "npx", "args": ["-y", "@mcp/server-fs", "/p"], "env": {"TOKEN": "x"}}
+//	http:  {"type": "http", "url": "https://mcp.notion.com/mcp", "headers": {"Authorization": "Bearer x"}}
+type MCPServerConfig struct {
+	// Type is "stdio" or "http". When empty it is inferred: a Command
+	// implies stdio, a URL implies http.
+	Type string `json:"type,omitempty"`
+	// Command and Args launch a stdio server as a child process.
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+	// Env sets extra environment variables for a stdio child (merged over
+	// the inherited environment).
+	Env map[string]string `json:"env,omitempty"`
+	// URL is the endpoint of an http (Streamable HTTP) server.
+	URL string `json:"url,omitempty"`
+	// Headers are extra HTTP headers sent with every request to an http
+	// server (e.g. an Authorization bearer token).
+	Headers map[string]string `json:"headers,omitempty"`
+	// Disabled skips the server without removing its entry.
+	Disabled bool `json:"disabled,omitempty"`
+}
+
+// Transport returns the resolved transport kind: the explicit Type, or an
+// inference from which fields are set ("stdio" for a command, "http" for a
+// URL). It returns "" when neither is present.
+func (m MCPServerConfig) Transport() string {
+	switch strings.ToLower(m.Type) {
+	case "stdio", "http":
+		return strings.ToLower(m.Type)
+	case "sse":
+		// Legacy SSE servers are addressed through the HTTP transport.
+		return "http"
+	}
+	if m.Command != "" {
+		return "stdio"
+	}
+	if m.URL != "" {
+		return "http"
+	}
+	return ""
+}
+
+// Scope selects which config file a write targets.
+type Scope string
+
+const (
+	// ScopeGlobal targets ~/.agent/config.json.
+	ScopeGlobal Scope = "global"
+	// ScopeProject targets <project>/.agent/config.json, which overrides
+	// the global file for that project.
+	ScopeProject Scope = "project"
+)
+
+// defaultModel returns the preset model for a provider, if one is known.
+func defaultModel(providerName string) string {
+	if p, ok := catalog.Lookup(providerName); ok {
+		return p.DefaultModel
+	}
+	return ""
+}
+
+// Path returns the global config file location, e.g.
+// ~/.agent/config.json (see the home package for directory resolution).
+func Path() (string, error) {
+	return home.Path("config.json"), nil
+}
+
+// ProjectPath returns the project config file location.
+func ProjectPath(projectDir string) string {
+	return filepath.Join(projectDir, ".agent", "config.json")
+}
+
+// pathFor maps a scope to its file path.
+func pathFor(scope Scope, projectDir string) (string, error) {
+	if scope == ScopeProject {
+		if projectDir == "" {
+			return "", fmt.Errorf("project scope requires a project directory")
+		}
+		return ProjectPath(projectDir), nil
+	}
+	return Path()
+}
+
+// Load resolves configuration for the current working directory. It never
+// fails on missing files — first-run works with pure env configuration.
+func Load() (*Config, error) {
+	wd, _ := os.Getwd()
+	return LoadIn(wd)
+}
+
+// LoadIn resolves configuration with projectDir's config layered on top of
+// the global one.
+//
+// Key flow: defaults → global file → project file (scalar fields override
+// when set; provider profiles merge by name) → environment → named-profile
+// resolution → model default.
+func LoadIn(projectDir string) (*Config, error) {
+	cfg := &Config{Provider: "deepseek", MaxTurns: 40}
+
+	if path, err := Path(); err == nil {
+		if err := mergeFile(cfg, path); err != nil {
+			return nil, err
+		}
+	}
+	if projectDir != "" {
+		if err := mergeFile(cfg, ProjectPath(projectDir)); err != nil {
+			return nil, err
+		}
+	}
+
+	applyEnv(cfg)
+	resolveProfile(cfg)
+	applyPreset(cfg)
+
+	if cfg.Model == "" {
+		cfg.Model = defaultModel(cfg.Provider)
+	}
+	if cfg.MaxTurns <= 0 {
+		cfg.MaxTurns = 40
+	}
+	if cfg.AutoCompact == "" {
+		cfg.AutoCompact = "on"
+	}
+	if cfg.ContextLimit <= 0 {
+		cfg.ContextLimit = DefaultContextLimit
+	}
+	return cfg, nil
+}
+
+// DefaultContextLimit is the assumed usable context window (tokens) when the
+// config does not specify one. It is deliberately conservative so compaction
+// engages before a small-window model rejects the request; raise it via
+// "context_limit" for large-window models.
+const DefaultContextLimit = 128000
+
+// mergeFile overlays one config file onto cfg. Scalars replace only when
+// present in the file; provider profiles merge by name so a project can add
+// or override individual profiles without repeating the global map.
+func mergeFile(cfg *Config, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil // a missing layer is not an error
+	}
+	var layer Config
+	if err := json.Unmarshal(data, &layer); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	if layer.Provider != "" {
+		cfg.Provider = layer.Provider
+	}
+	if layer.Model != "" {
+		cfg.Model = layer.Model
+	}
+	if layer.APIKey != "" {
+		cfg.APIKey = layer.APIKey
+	}
+	if layer.BaseURL != "" {
+		cfg.BaseURL = layer.BaseURL
+	}
+	if layer.MaxTurns > 0 {
+		cfg.MaxTurns = layer.MaxTurns
+	}
+	if layer.PermissionMode != "" {
+		cfg.PermissionMode = layer.PermissionMode
+	}
+	if layer.GoalMaxRounds > 0 {
+		cfg.GoalMaxRounds = layer.GoalMaxRounds
+	}
+	if layer.Thinking != "" {
+		cfg.Thinking = layer.Thinking
+	}
+	if layer.VisionProvider != "" {
+		cfg.VisionProvider = layer.VisionProvider
+	}
+	if layer.VisionModel != "" {
+		cfg.VisionModel = layer.VisionModel
+	}
+	if layer.AutoCompact != "" {
+		cfg.AutoCompact = layer.AutoCompact
+	}
+	if layer.ContextLimit > 0 {
+		cfg.ContextLimit = layer.ContextLimit
+	}
+	for name, p := range layer.Providers {
+		if cfg.Providers == nil {
+			cfg.Providers = map[string]ProviderConfig{}
+		}
+		cfg.Providers[name] = p
+	}
+	for name, s := range layer.MCPServers {
+		if cfg.MCPServers == nil {
+			cfg.MCPServers = map[string]MCPServerConfig{}
+		}
+		cfg.MCPServers[name] = s
+	}
+	for name, s := range layer.Subagents {
+		if cfg.Subagents == nil {
+			cfg.Subagents = map[string]SubagentConfig{}
+		}
+		cfg.Subagents[name] = s
+	}
+	return nil
+}
+
+// applyEnv overlays environment variables. AGENT_* wins over
+// vendor-specific key variables.
+func applyEnv(cfg *Config) {
+	if v := os.Getenv("AGENT_PROVIDER"); v != "" {
+		cfg.Provider = v
+	}
+	if v := os.Getenv("AGENT_MODEL"); v != "" {
+		cfg.Model = v
+	}
+	if v := os.Getenv("AGENT_BASE_URL"); v != "" {
+		cfg.BaseURL = v
+	}
+	if v := os.Getenv("AGENT_API_KEY"); v != "" {
+		cfg.APIKey = v
+	}
+	if cfg.APIKey == "" {
+		cfg.APIKey = envKeyFor(cfg.Provider)
+	}
+}
+
+// envKeyFor reads the first non-empty credential environment variable a
+// provider preset declares, so a vendor's conventional variable works with
+// no configuration at all.
+func envKeyFor(providerName string) string {
+	p, ok := catalog.Lookup(providerName)
+	if !ok {
+		return ""
+	}
+	for _, key := range p.EnvKeys {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// resolveProfile fills connection settings from a named provider profile
+// when cfg.Provider matches one; explicit top-level values keep precedence.
+func resolveProfile(cfg *Config) {
+	p, ok := cfg.Providers[cfg.Provider]
+	if !ok {
+		return
+	}
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = p.BaseURL
+	}
+	if cfg.Model == "" {
+		cfg.Model = p.Model
+	}
+	if cfg.APIKey == "" {
+		cfg.APIKey = p.APIKey
+	}
+	if cfg.APIKey == "" && p.EnvKey != "" {
+		cfg.APIKey = os.Getenv(p.EnvKey)
+	}
+}
+
+// orDefault returns s, or def when s is empty.
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+// applyPreset fills unset connection settings from the built-in catalog.
+//
+// Key flow: it runs after the user's own profile so explicit configuration
+// always wins; the preset only supplies what is still blank. This is what
+// lets `provider: glm` work with nothing else configured.
+func applyPreset(cfg *Config) {
+	// A user-defined profile of the same name shadows the preset entirely.
+	if _, shadowed := cfg.Providers[cfg.Provider]; shadowed {
+		return
+	}
+	p, ok := catalog.Lookup(cfg.Provider)
+	if !ok {
+		return
+	}
+	// Canonicalize aliases ("zhipu" → "glm") so downstream lookups agree.
+	cfg.Provider = p.Name
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = p.BaseURL
+	}
+	if cfg.Model == "" {
+		cfg.Model = p.DefaultModel
+	}
+	if cfg.APIKey == "" {
+		cfg.APIKey = envKeyFor(p.Name)
+	}
+}
+
+// IsNamedProfile reports whether name refers to a providers-map entry
+// rather than a built-in vendor.
+func (c *Config) IsNamedProfile(name string) bool {
+	_, ok := c.Providers[name]
+	return ok
+}
+
+// LoadFor resolves configuration like Load, then re-targets it at the given
+// provider. Used for mid-session provider switching: file/env settings
+// bound to the previous provider are dropped and re-resolved so a stale key
+// or endpoint is never sent to the new vendor.
+func LoadFor(providerName string) (*Config, error) {
+	cfg, err := Load()
+	if err != nil {
+		return nil, err
+	}
+	if providerName == "" || providerName == cfg.Provider {
+		return cfg, nil
+	}
+	cfg.Provider = providerName
+	cfg.Model = defaultModel(providerName)
+	cfg.BaseURL = os.Getenv("AGENT_BASE_URL")
+	cfg.APIKey = os.Getenv("AGENT_API_KEY")
+	if cfg.APIKey == "" {
+		cfg.APIKey = envKeyFor(providerName)
+	}
+	resolveProfile(cfg)
+	applyPreset(cfg)
+	return cfg, nil
+}
+
+// BuildProvider constructs the LLM client for this configuration. Named
+// profiles (providers-map entries) become OpenAI-compatible clients under
+// their profile name; everything else goes through the built-in registry.
+func (c *Config) BuildProvider() (provider.Provider, error) {
+	pc := provider.Config{APIKey: c.APIKey, BaseURL: c.BaseURL, Model: c.Model, Thinking: c.Thinking}
+	if p, ok := c.Providers[c.Provider]; ok {
+		pc.Auth = p.Auth
+		return provider.NewProfile(c.Provider, p.Format, pc)
+	}
+	if p, ok := catalog.Lookup(c.Provider); ok {
+		// Naming the exact variable to export turns the most common
+		// setup failure into a one-line fix.
+		if c.APIKey == "" && p.Format != provider.FormatAnthropic {
+			return nil, fmt.Errorf("provider %s needs a credential: export %s (get one at %s)",
+				p.Name, strings.Join(p.EnvKeys, " or "), orDefault(p.Notes, "the vendor console"))
+		}
+		// A preset that is not a registered built-in is built like a
+		// profile, using the preset's wire format and auth style.
+		if !provider.IsRegistered(c.Provider) {
+			pc.Auth = p.Auth
+			return provider.NewProfile(p.Name, p.Format, pc)
+		}
+	}
+	return provider.New(c.Provider, pc)
+}
+
+// ModelSupportsVision reports whether the active provider/model can accept
+// image input: either the model name is recognized as a vision family, or
+// the active named profile is explicitly marked "vision": true.
+func (c *Config) ModelSupportsVision() bool {
+	if p, ok := c.Providers[c.Provider]; ok && p.Vision {
+		return true
+	}
+	if p, ok := catalog.Lookup(c.Provider); ok && p.Vision {
+		return true
+	}
+	return provider.SupportsVision(c.Model)
+}
+
+// validKeys documents the keys accepted by SetScoped, with validators where
+// needed.
+var validKeys = map[string]func(string) error{
+	"provider":        nil,
+	"model":           nil,
+	"api_key":         nil,
+	"base_url":        nil,
+	"max_turns":       validatePositiveInt,
+	"goal_max_rounds": validatePositiveInt,
+	"vision_provider": nil,
+	"vision_model":    nil,
+	"context_limit":   validatePositiveInt,
+	"auto_compact": func(v string) error {
+		if v != "on" && v != "off" {
+			return fmt.Errorf("must be on or off, got %q", v)
+		}
+		return nil
+	},
+	"thinking": func(v string) error {
+		if v != "off" && v != "adaptive" {
+			return fmt.Errorf("must be adaptive or off, got %q", v)
+		}
+		return nil
+	},
+	"permission_mode": func(v string) error {
+		if v != "hitl" && v != "bypass" {
+			return fmt.Errorf("must be hitl or bypass, got %q", v)
+		}
+		return nil
+	},
+}
+
+// Keys returns the settable configuration keys in display order.
+func Keys() []string {
+	return []string{"provider", "model", "api_key", "base_url", "max_turns", "permission_mode", "goal_max_rounds", "vision_provider", "vision_model", "thinking", "auto_compact", "context_limit"}
+}
+
+// Set persists one field to the global config file (backwards-compatible
+// wrapper around SetScoped).
+func Set(key, value string) error {
+	return SetScoped(ScopeGlobal, "", key, value)
+}
+
+// SetScoped persists one field to the chosen scope's file. Only file-backed
+// values are touched — never environment-resolved ones — so a set cannot
+// accidentally freeze a value that came from the shell.
+func SetScoped(scope Scope, projectDir, key, value string) error {
+	validate, ok := validKeys[key]
+	if !ok {
+		return fmt.Errorf("unknown config key %q (valid: %v)", key, Keys())
+	}
+	if validate != nil {
+		if err := validate(value); err != nil {
+			return fmt.Errorf("%s: %w", key, err)
+		}
+	}
+
+	path, err := pathFor(scope, projectDir)
+	if err != nil {
+		return err
+	}
+	cfg := &Config{}
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("parse existing config: %w", err)
+		}
+	}
+	switch key {
+	case "provider":
+		cfg.Provider = value
+	case "model":
+		cfg.Model = value
+	case "api_key":
+		cfg.APIKey = value
+	case "base_url":
+		cfg.BaseURL = value
+	case "max_turns":
+		fmt.Sscanf(value, "%d", &cfg.MaxTurns)
+	case "goal_max_rounds":
+		fmt.Sscanf(value, "%d", &cfg.GoalMaxRounds)
+	case "permission_mode":
+		cfg.PermissionMode = value
+	case "vision_provider":
+		cfg.VisionProvider = value
+	case "vision_model":
+		cfg.VisionModel = value
+	case "thinking":
+		cfg.Thinking = value
+	case "auto_compact":
+		cfg.AutoCompact = value
+	case "context_limit":
+		fmt.Sscanf(value, "%d", &cfg.ContextLimit)
+	}
+	return cfg.saveTo(path)
+}
+
+func validatePositiveInt(s string) error {
+	var n int
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil || n <= 0 {
+		return fmt.Errorf("must be a positive integer, got %q", s)
+	}
+	return nil
+}
+
+// Save writes the global config file, creating ~/.agent if needed.
+func (c *Config) Save() error {
+	path, err := Path()
+	if err != nil {
+		return err
+	}
+	return c.saveTo(path)
+}
+
+func (c *Config) saveTo(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	// 0600: the file may contain an API key.
+	return os.WriteFile(path, append(data, '\n'), 0o600)
+}

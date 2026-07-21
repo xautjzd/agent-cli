@@ -1,0 +1,22 @@
+# Binary
+/agent
+agent.exe
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go workspace
+go.work
+go.work.sum
+
+# Environment
+.env
+.env.local

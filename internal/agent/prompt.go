@@ -1,0 +1,63 @@
+package agent
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/xautjzd/agent-cli/internal/memory"
+	"github.com/xautjzd/agent-cli/internal/skill"
+)
+
+// PromptBuilder assembles the system prompt from static instructions,
+// AGENT.md files, saved memories and skill metadata. Isolating this in one
+// type keeps prompt policy independent of the conversation loop (SRP).
+type PromptBuilder struct {
+	WorkDir string
+	Skills  skill.Repository
+	Memory  memory.Store
+}
+
+const basePrompt = `You are an autonomous coding agent operating in a terminal.
+
+Rules:
+- Use the provided tools to inspect and modify the project; never fabricate file contents or command output.
+- Prefer edit_file for small changes and write_file only for new or fully rewritten files.
+- After changing code, verify it (build, tests) with the bash tool before declaring success.
+- When a task matches an available skill's description, call use_skill first and follow its instructions.
+- Save durable, non-obvious project knowledge with the remember tool; keep memories short and factual.
+- Be concise. Report what you did and what you verified.`
+
+// Build produces the full system prompt.
+//
+// Key flow: static behavior rules come first, then user instructions
+// (AGENT.md), then recalled memories, then the skill catalog. Ordering is
+// deliberate — later sections carry the most session-specific context and
+// models weight the extremes of the prompt most heavily.
+func (b *PromptBuilder) Build() string {
+	var sb strings.Builder
+	sb.WriteString(basePrompt)
+	fmt.Fprintf(&sb, "\n\nWorking directory: %s\n", b.WorkDir)
+
+	if instr := memory.LoadInstructions(b.WorkDir); instr != "" {
+		sb.WriteString("\n## User instructions\n\n" + instr + "\n")
+	}
+
+	if b.Memory != nil {
+		if entries, err := b.Memory.List(); err == nil && len(entries) > 0 {
+			sb.WriteString("\n## Project memory (saved in earlier sessions)\n\n")
+			for _, e := range entries {
+				fmt.Fprintf(&sb, "### %s\n%s\n\n", e.Name, e.Content)
+			}
+		}
+	}
+
+	if b.Skills != nil {
+		if skills, err := b.Skills.List(); err == nil && len(skills) > 0 {
+			sb.WriteString("\n## Available skills (load with use_skill when relevant)\n\n")
+			for _, s := range skills {
+				fmt.Fprintf(&sb, "- %s: %s\n", s.Name, s.Description)
+			}
+		}
+	}
+	return sb.String()
+}
