@@ -31,6 +31,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/permission"
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/repl"
+	"github.com/xautjzd/agent-cli/internal/sandbox"
 	"github.com/xautjzd/agent-cli/internal/session"
 	"github.com/xautjzd/agent-cli/internal/skill"
 	"github.com/xautjzd/agent-cli/internal/subagent"
@@ -144,13 +145,21 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	skillRepo := &skill.FSRepository{Roots: skill.DefaultRoots(workDir)}
 	memStore := memory.NewProjectStore(workDir)
 
+	// Optional command sandboxing (defense in depth beneath the permission
+	// gate): confines bash commands' writes to the project when a backend is
+	// available.
+	sbox := sandbox.New(sandbox.Options{Mode: cfg.Sandbox, DenyNetwork: cfg.SandboxDenyNetwork})
+	if cfg.Sandbox == "on" && !sbox.Available() {
+		fmt.Fprintf(os.Stderr, "warning: sandbox requested but unavailable — %s\n", sbox.Reason())
+	}
+
 	// buildBaseTools produces one fresh set of the built-in tools. It is used
 	// both for the main registry and to give each subagent its own isolated
 	// tools — it deliberately excludes the "task" tool so a subagent cannot
 	// spawn further subagents (bounding delegation depth to one).
 	buildBaseTools := func() []tool.Tool {
 		return []tool.Tool{
-			&tool.Bash{WorkDir: workDir},
+			&tool.Bash{WorkDir: workDir, Sandbox: sbox, DenyNetwork: cfg.SandboxDenyNetwork},
 			&tool.ReadFile{WorkDir: workDir},
 			&tool.WriteFile{WorkDir: workDir},
 			&tool.EditFile{WorkDir: workDir},
@@ -201,17 +210,23 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	// /provider or /model switch applies to delegated work too.
 	spawner.Parent = ag
 	r := &repl.Repl{
-		Agent:    ag,
-		Cfg:      cfg,
-		Skills:   skillRepo,
-		Memory:   memStore,
-		Tools:    registry,
-		MCP:      mcpMgr,
-		Spawner:  spawner,
-		Sessions: session.NewProjectStore(workDir),
-		WorkDir:  workDir,
-		In:       os.Stdin,
-		Out:      os.Stdout,
+		Agent:         ag,
+		Cfg:           cfg,
+		Skills:        skillRepo,
+		Memory:        memStore,
+		Tools:         registry,
+		MCP:           mcpMgr,
+		Spawner:       spawner,
+		Policy:        buildPolicy(cfg, workDir),
+		Audit:         permission.NewAuditLogger(session.AuditLogPath(workDir)),
+		SandboxActive: sbox.Available(),
+		Sessions:      session.NewProjectStore(workDir),
+		WorkDir:       workDir,
+		In:            os.Stdin,
+		Out:           os.Stdout,
+	}
+	if sbox.Available() {
+		fmt.Fprintf(os.Stdout, "\033[2m● sandbox: %s\033[0m\n", sbox.Reason())
 	}
 	// The REPL is the permission gate: dangerous tool calls are confirmed
 	// (HITL) or audit-logged (bypass) before execution — for the main agent
@@ -224,6 +239,30 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	}
 	r.GoalMaxRounds = cfg.GoalMaxRounds
 	return r, nil
+}
+
+// buildPolicy assembles the permission policy from config: the bash posture
+// plus any user-defined approval rules. An invalid rule is reported to stderr
+// but does not abort startup.
+func buildPolicy(cfg *config.Config, workDir string) *permission.Policy {
+	posture := permission.PostureStandard
+	if cfg.BashPolicy == string(permission.PostureStrict) {
+		posture = permission.PostureStrict
+	}
+	rules := make([]permission.Rule, 0, len(cfg.PermissionRules))
+	for _, pr := range cfg.PermissionRules {
+		rules = append(rules, permission.Rule{
+			Tool:    pr.Tool,
+			Command: pr.Command,
+			Path:    pr.Path,
+			Action:  permission.Action(pr.Action),
+		})
+	}
+	pol, errs := permission.NewPolicy(posture, rules)
+	for _, err := range errs {
+		fmt.Fprintf(os.Stderr, "warning: invalid permission rule: %v\n", err)
+	}
+	return pol
 }
 
 // subagentDefs builds the subagent type table: the built-in general-purpose

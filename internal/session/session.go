@@ -118,6 +118,12 @@ func ProjectDir(projectDir string) string {
 	return home.Path("projects", EncodeProjectPath(projectDir), "sessions")
 }
 
+// AuditLogPath returns the user-level audit-log file for one project, kept
+// beside its sessions (out of the shared working tree).
+func AuditLogPath(projectDir string) string {
+	return home.Path("projects", EncodeProjectPath(projectDir), "audit.log")
+}
+
 // EncodeProjectPath turns an absolute project path into a single directory
 // name by replacing path separators with dashes, so the origin stays
 // legible when browsing the agent home.

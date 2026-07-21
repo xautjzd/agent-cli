@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/xautjzd/agent-cli/internal/sandbox"
 )
 
 // Bash executes shell commands in the project working directory.
@@ -15,6 +17,11 @@ type Bash struct {
 	WorkDir string
 	// DefaultTimeout bounds command execution; zero means 2 minutes.
 	DefaultTimeout time.Duration
+	// Sandbox optionally confines commands (defense in depth). Nil runs
+	// commands unconfined via bash -c.
+	Sandbox sandbox.Sandbox
+	// DenyNetwork asks the sandbox to block outbound network where supported.
+	DenyNetwork bool
 }
 
 func (b *Bash) Name() string { return "bash" }
@@ -62,7 +69,13 @@ func (b *Bash) Execute(ctx context.Context, input json.RawMessage) (string, erro
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", args.Command)
+	// Build the command line, confining it through the sandbox when one is
+	// configured and active; otherwise fall back to a plain bash -c.
+	argv := []string{"bash", "-c", args.Command}
+	if b.Sandbox != nil && b.Sandbox.Available() {
+		argv = b.Sandbox.Argv(args.Command, b.WorkDir, b.DenyNetwork)
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = b.WorkDir
 	out, err := cmd.CombinedOutput()
 

@@ -158,6 +158,7 @@ picker instead. Commands:
 | `/goal <text>` | Set a session goal the agent keeps working toward until met (`/goal` shows it, `/goal clear` drops it) |
 | `/plan [task]` | Plan mode: explore read-only, propose a plan, implement on approval (`/plan off` exits) |
 | `/mode [hitl\|bypass]` | Show or switch the permission mode for dangerous operations |
+| `/security` | Show active security settings (mode, bash posture, rules, sandbox, audit log) |
 | `/usage` | Show session token totals, model time, and current context occupancy |
 | `/compact` | Summarize earlier turns to free up context now (also runs automatically) |
 | `/rename [title]` | Rename the current session (no argument prompts for one) |
@@ -297,21 +298,26 @@ operations: destructive shell commands (`rm`, `sudo`, `git push`, `git reset --h
 `chmod`, `kill`, piping downloads into a shell, …) and file writes **outside** the
 project directory. Two modes decide what happens:
 
-- **`hitl` (default)** — dangerous operations pause and ask:
+- **`hitl` (default)** — dangerous operations pause and ask, showing a **diff preview**
+  for file edits so you approve the concrete change, not just a path:
 
   ```
-  ⚠ Dangerous operation requested
-    tool: bash
-    reason: file deletion (rm)
-    args: {"command": "rm victim.txt"}
-  Allow this operation? [y/N]
+  ⚠ Approval required
+    tool: edit_file
+    reason: writing outside the project directory (/etc/hosts)
+    change:
+        1 - 127.0.0.1 localhost
+        1 + 127.0.0.1 evil
+  Allow? [y]es / [n]o / [a]lways (this session) / [d]eny always
   ```
 
-  Denying feeds the refusal back to the model as the tool result, so it adjusts course
-  instead of aborting.
+  **`a`** remembers the choice for the rest of the session (scoped to the command's
+  program or the file's directory) so you are not re-prompted; **`d`** denies it for the
+  session. Denying feeds the refusal back to the model as the tool result, so it adjusts
+  course instead of aborting.
 
 - **`bypass`** — no confirmations; the agent completes the task autonomously. Every
-  dangerous operation is auto-approved **with an audit note injected into the
+  dangerous operation is auto-approved **with a structured audit note injected into the
   conversation context** (tool, risk reason, full arguments, time, cwd). Because tool
   results are part of the context, the note is sent to the model *and* persisted in the
   session file — `agent session show <id>` reveals exactly what ran unattended.
@@ -319,7 +325,65 @@ project directory. Two modes decide what happens:
 Switch with `/mode bypass` / `/mode hitl`, or start one-shot runs with `agent -bypass -p "..."`.
 **An active `/goal` always runs in bypass mode** (goal pursuit must not stall on
 confirmations); the effective mode reverts when the goal clears. `/config` shows the
-effective mode.
+effective mode. Run **`/security`** to see the full active configuration.
+
+### Hardened command classification
+
+The dangerous-command classifier does not match the raw command string (a deny-list that
+`\rm`, `/bin/rm`, `"rm"`, or `sh -c 'rm …'` would slip past). Instead it **tokenizes** the
+command into the individual programs it will actually run — splitting on `; | && ||` and
+extracting `$(…)` substitutions, respecting quotes — then **normalizes** each program name
+(strips the directory, a leading backslash, surrounding quotes) and classifies the
+normalized name. Obfuscating a command name is itself flagged; shell interpreters
+(`sh -c`, `eval`, …) are dangerous because they run anything; command wrappers
+(`timeout`, `env`, `xargs`, …) are unwrapped and their payload re-checked; and anything
+unparseable **fails closed**. Two postures (`bash_policy`):
+
+- **`standard`** (default) — flag known-dangerous commands, allow the rest.
+- **`strict`** — additionally require approval for any command **not** on the known-safe
+  allow-list (default-deny for the unknown).
+
+### Approval rules (per tool / path / command)
+
+Beyond the built-in classifier, declare granular rules under `permissions` in `config.json`.
+Rules are evaluated in order; the first match wins; `action` is `allow`, `ask`, or `deny`
+(a `deny` blocks in every mode, even bypass):
+
+```jsonc
+{
+  "permissions": [
+    { "tool": "bash", "command": "\\bgit\\s+push\\b", "action": "deny" },   // never push
+    { "tool": "edit_file", "path": "vendor/**", "action": "deny" },         // vendor is off-limits
+    { "tool": "write_file", "path": "src/**", "action": "allow" }           // auto-approve src edits
+  ]
+}
+```
+
+`command` is a regex matched against a bash command; `path` is a glob (`**` spans
+directories) matched against a file path (relative or absolute).
+
+### Command sandbox (defense in depth)
+
+Optionally confine bash commands so a mistaken or malicious command cannot write outside
+the project — a layer *beneath* the gate (the gate decides *whether* a command runs; the
+sandbox limits *what* it can touch). Enable with `sandbox` = `on` / `auto` (`auto` is
+silent when no backend is present):
+
+- **macOS** — `sandbox-exec` (Seatbelt) with a generated profile: reads allowed broadly,
+  **writes confined to the working directory** (plus temp/cache), optionally no network.
+- **Linux** — `bubblewrap` (`bwrap`): host bind-mounted read-only, the project writable.
+
+```jsonc
+{ "sandbox": "auto", "sandbox_deny_network": false }
+```
+
+### Structured audit log
+
+Every gated decision — approved, denied, or auto-approved in bypass — is appended as a
+JSON line to a per-project audit log (`~/.agent/projects/<encoded>/audit.log`), with the
+time, tool, full arguments, decision, reason, matched rule, mode, cwd, and whether the
+command was sandboxed. `/security` prints its path. This is a durable record, separate
+from the in-context note the model sees.
 
 ### Output rendering
 
@@ -718,6 +782,8 @@ internal/provider/    Provider/Streamer interfaces + factory registry
 internal/tool/        Tool interface, registry, built-in tools
 internal/editmatch/   Context-anchored, whitespace-tolerant edit matching (edit_file)
 internal/subagent/    Task delegation: Spawner + task tool (isolated, parallel subagents)
+internal/permission/  Risk classifier (tokenizing, evasion-resistant), policy rules, audit log
+internal/sandbox/     Command confinement backends (sandbox-exec, bwrap, noop)
 internal/skill/       SKILL.md parsing, discovery (FSRepository), installer
 internal/memory/      AGENT.md loading + file-backed memory store
 internal/session/     Session persistence for /resume (one JSON file per session)

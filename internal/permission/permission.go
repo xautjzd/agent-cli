@@ -12,8 +12,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"regexp"
-	"strings"
 )
 
 // Mode selects how dangerous operations are handled.
@@ -27,48 +25,46 @@ const (
 	ModeBypass Mode = "bypass"
 )
 
-// dangerousPatterns matches shell commands with destructive or
-// irreversible potential. Each entry carries a human-readable reason used
-// in prompts and audit notes.
-var dangerousPatterns = []struct {
-	re     *regexp.Regexp
-	reason string
-}{
-	{regexp.MustCompile(`\brm\s`), "file deletion (rm)"},
-	{regexp.MustCompile(`\brmdir\b`), "directory deletion (rmdir)"},
-	{regexp.MustCompile(`\bsudo\b`), "privilege escalation (sudo)"},
-	{regexp.MustCompile(`\bch(mod|own)\b`), "permission/ownership change"},
-	{regexp.MustCompile(`\b(kill|pkill|killall)\b`), "process termination"},
-	{regexp.MustCompile(`\bdd\s`), "raw disk/file writing (dd)"},
-	{regexp.MustCompile(`\bmkfs`), "filesystem formatting"},
-	{regexp.MustCompile(`\b(shutdown|reboot|halt)\b`), "system power control"},
-	{regexp.MustCompile(`\bgit\s+push\b`), "publishing to a remote (git push)"},
-	{regexp.MustCompile(`\bgit\s+reset\s+--hard\b`), "discarding work (git reset --hard)"},
-	{regexp.MustCompile(`\bgit\s+clean\b`), "deleting untracked files (git clean)"},
-	{regexp.MustCompile(`(curl|wget)[^|;]*\|\s*(ba|z)?sh\b`), "piping a download into a shell"},
-	{regexp.MustCompile(`\btruncate\b`), "file truncation"},
-	{regexp.MustCompile(`\bmv\s+[^ ]+\s+/(?:\s|$)`), "moving files to filesystem root"},
+// Posture selects how bash commands are classified.
+type Posture string
+
+const (
+	// PostureStandard flags known-dangerous commands (robust deny-list with
+	// obfuscation-resistant parsing) and treats the rest as safe. Default.
+	PostureStandard Posture = "standard"
+	// PostureStrict additionally treats any command not on the known-safe
+	// allow-list as requiring approval (default-deny for the unknown).
+	PostureStrict Posture = "strict"
+)
+
+// Classify reports whether a tool call is dangerous and why, using the
+// standard posture. It is the backward-compatible entry point; ClassifyWith
+// takes an explicit posture.
+func Classify(toolName string, args json.RawMessage, workDir string) (bool, string) {
+	return ClassifyWith(PostureStandard, toolName, args, workDir)
 }
 
-// Classify reports whether a tool call is dangerous and why.
+// ClassifyWith reports whether a tool call is dangerous and why.
 //
-// Key flow: bash commands are matched against the destructive-pattern list;
-// file-writing tools are dangerous only when they target a path outside the
-// project working directory (in-project edits are the agent's normal job).
-// Everything else is safe.
-func Classify(toolName string, args json.RawMessage, workDir string) (bool, string) {
+// Key flow: bash commands are tokenized and each resolved command classified
+// (see analyze.go), which resists deny-list evasion; under the strict posture
+// an unrecognized command is also flagged. File-writing tools are dangerous
+// only when they target a path outside the project working directory
+// (in-project edits are the agent's normal job). Everything else is safe.
+func ClassifyWith(posture Posture, toolName string, args json.RawMessage, workDir string) (bool, string) {
 	switch toolName {
 	case "bash":
 		var a struct {
 			Command string `json:"command"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil {
-			return false, ""
+			return true, "unparseable bash arguments" // fail closed
 		}
-		for _, p := range dangerousPatterns {
-			if p.re.MatchString(a.Command) {
-				return true, p.reason
-			}
+		if dangerous, reason := analyzeCommand(a.Command, workDir); dangerous {
+			return true, reason
+		}
+		if posture == PostureStrict && !isKnownSafe(a.Command, workDir) {
+			return true, "unrecognized command (strict mode requires approval)"
 		}
 	case "write_file", "edit_file":
 		var a struct {
@@ -77,14 +73,8 @@ func Classify(toolName string, args json.RawMessage, workDir string) (bool, stri
 		if err := json.Unmarshal(args, &a); err != nil || a.Path == "" {
 			return false, ""
 		}
-		path := a.Path
-		if !filepath.IsAbs(path) {
-			return false, "" // relative paths resolve inside the project
-		}
-		clean := filepath.Clean(path)
-		root := filepath.Clean(workDir)
-		if clean != root && !strings.HasPrefix(clean, root+string(filepath.Separator)) {
-			return true, fmt.Sprintf("writing outside the project directory (%s)", clean)
+		if filepath.IsAbs(a.Path) && !withinDir(a.Path, workDir) {
+			return true, fmt.Sprintf("writing outside the project directory (%s)", filepath.Clean(a.Path))
 		}
 	}
 	return false, ""

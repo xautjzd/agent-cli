@@ -64,6 +64,16 @@ type Config struct {
 	// PermissionMode is the startup permission mode: "hitl" (default) or
 	// "bypass".
 	PermissionMode string `json:"permission_mode,omitempty"`
+	// BashPolicy selects command-risk posture: "standard" (robust deny-list,
+	// default) or "strict" (also asks about unrecognized commands).
+	BashPolicy string `json:"bash_policy,omitempty"`
+	// PermissionRules are user-defined approval rules evaluated before the
+	// built-in classifier, giving per-tool and per-path/command control.
+	PermissionRules []PermissionRule `json:"permissions,omitempty"`
+	// Sandbox selects command confinement: "off" (default), "on", or "auto".
+	Sandbox string `json:"sandbox,omitempty"`
+	// SandboxDenyNetwork asks the sandbox to block outbound network.
+	SandboxDenyNetwork bool `json:"sandbox_deny_network,omitempty"`
 	// GoalMaxRounds caps /goal work-check rounds per trigger (default 8).
 	GoalMaxRounds int `json:"goal_max_rounds,omitempty"`
 	// Thinking controls extended thinking on providers that support it
@@ -94,6 +104,17 @@ type Config struct {
 	// to, keyed by type name. The built-in general-purpose type is always
 	// available.
 	Subagents map[string]SubagentConfig `json:"subagents,omitempty"`
+}
+
+// PermissionRule is one user-defined approval rule (see the permission
+// package's Rule). action is "allow", "ask", or "deny"; tool "*" or empty
+// matches any tool; command is a regex matched against bash commands; path is
+// a glob matched against file paths.
+type PermissionRule struct {
+	Tool    string `json:"tool,omitempty"`
+	Command string `json:"command,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Action  string `json:"action"`
 }
 
 // SubagentConfig defines one custom subagent type (see the subagent package).
@@ -274,6 +295,20 @@ func mergeFile(cfg *Config, path string) error {
 	if layer.PermissionMode != "" {
 		cfg.PermissionMode = layer.PermissionMode
 	}
+	if layer.BashPolicy != "" {
+		cfg.BashPolicy = layer.BashPolicy
+	}
+	if layer.Sandbox != "" {
+		cfg.Sandbox = layer.Sandbox
+	}
+	if layer.SandboxDenyNetwork {
+		cfg.SandboxDenyNetwork = true
+	}
+	// Permission rules accumulate across layers (project rules extend global
+	// ones), project appended after global so they take later precedence when
+	// the gate wants project-specific overrides first (it prepends session
+	// choices separately).
+	cfg.PermissionRules = append(cfg.PermissionRules, layer.PermissionRules...)
 	if layer.GoalMaxRounds > 0 {
 		cfg.GoalMaxRounds = layer.GoalMaxRounds
 	}
@@ -487,6 +522,18 @@ var validKeys = map[string]func(string) error{
 	"vision_provider": nil,
 	"vision_model":    nil,
 	"context_limit":   validatePositiveInt,
+	"bash_policy": func(v string) error {
+		if v != "standard" && v != "strict" {
+			return fmt.Errorf("must be standard or strict, got %q", v)
+		}
+		return nil
+	},
+	"sandbox": func(v string) error {
+		if v != "off" && v != "on" && v != "auto" {
+			return fmt.Errorf("must be off, on, or auto, got %q", v)
+		}
+		return nil
+	},
 	"auto_compact": func(v string) error {
 		if v != "on" && v != "off" {
 			return fmt.Errorf("must be on or off, got %q", v)
@@ -509,7 +556,7 @@ var validKeys = map[string]func(string) error{
 
 // Keys returns the settable configuration keys in display order.
 func Keys() []string {
-	return []string{"provider", "model", "api_key", "base_url", "max_turns", "permission_mode", "goal_max_rounds", "vision_provider", "vision_model", "thinking", "auto_compact", "context_limit"}
+	return []string{"provider", "model", "api_key", "base_url", "max_turns", "permission_mode", "goal_max_rounds", "vision_provider", "vision_model", "thinking", "auto_compact", "context_limit", "bash_policy", "sandbox"}
 }
 
 // Set persists one field to the global config file (backwards-compatible
@@ -567,6 +614,10 @@ func SetScoped(scope Scope, projectDir, key, value string) error {
 		cfg.AutoCompact = value
 	case "context_limit":
 		fmt.Sscanf(value, "%d", &cfg.ContextLimit)
+	case "bash_policy":
+		cfg.BashPolicy = value
+	case "sandbox":
+		cfg.Sandbox = value
 	}
 	return cfg.saveTo(path)
 }

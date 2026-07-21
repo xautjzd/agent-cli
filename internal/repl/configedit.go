@@ -61,6 +61,13 @@ func (r *Repl) currentValue(key string) string {
 			n = config.DefaultContextLimit
 		}
 		return strconv.Itoa(n)
+	case "bash_policy":
+		if r.Cfg.BashPolicy == "strict" {
+			return "strict"
+		}
+		return "standard"
+	case "sandbox":
+		return orDefault(r.Cfg.Sandbox, "off")
 	}
 	return ""
 }
@@ -224,6 +231,20 @@ func (r *Repl) applyLive(ctx context.Context, key, value string) error {
 		}
 		r.Cfg.ContextLimit = n
 		r.Agent.ContextLimit = n
+		return nil
+	case "bash_policy":
+		if value != "standard" && value != "strict" {
+			return fmt.Errorf("bash_policy must be standard or strict")
+		}
+		r.Cfg.BashPolicy = value
+		r.policyOrDefault().SetPosture(permission.Posture(value))
+		return nil
+	case "sandbox":
+		if value != "off" && value != "on" && value != "auto" {
+			return fmt.Errorf("sandbox must be off, on, or auto")
+		}
+		r.Cfg.Sandbox = value
+		fmt.Fprintln(r.Out, "note: sandbox change takes effect on restart")
 		return nil
 	}
 	return fmt.Errorf("unknown config key %q (valid: %v)", key, config.Keys())

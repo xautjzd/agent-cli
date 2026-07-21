@@ -62,6 +62,13 @@ type Repl struct {
 	// interleave permission prompts or their output.
 	gateMu sync.Mutex
 
+	// Policy decides approval for tool calls (rules + risk classifier); nil
+	// lazily builds a default. Audit records every gated decision as
+	// structured JSON. SandboxActive reflects whether bash is confined.
+	Policy        *permission.Policy
+	Audit         *permission.AuditLogger
+	SandboxActive bool
+
 	// VisionClient overrides the lazily built vision-fallback provider
 	// (primarily a test seam).
 	VisionClient provider.Provider
@@ -135,6 +142,7 @@ func init() {
 		{"goal", "/goal [text|clear]", "Set a session goal the agent works toward until met", (*Repl).cmdGoal},
 		{"plan", "/plan [task|off]", "Plan mode: explore read-only, propose a plan, implement on approval", (*Repl).cmdPlan},
 		{"mode", "/mode [hitl|bypass]", "Show or switch the permission mode for dangerous operations", (*Repl).cmdMode},
+		{"security", "/security", "Show the active security settings (mode, posture, rules, sandbox, audit)", (*Repl).cmdSecurity},
 		{"usage", "/usage", "Show token usage, timing, and context occupancy", (*Repl).cmdUsage},
 		{"rename", "/rename [title]", "Rename the current session", (*Repl).cmdRename},
 		{"new", "/new", "Start a new session (current one stays resumable)", (*Repl).cmdNew},

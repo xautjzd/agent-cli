@@ -39,6 +39,8 @@ var configSettings = []setting{
 	{"base_url", "Base URL", kindText, nil},
 	{"thinking", "Extended thinking", kindEnum, []string{"adaptive", "off"}},
 	{"permission_mode", "Permission mode", kindEnum, []string{"hitl", "bypass"}},
+	{"bash_policy", "Bash risk posture", kindEnum, []string{"standard", "strict"}},
+	{"sandbox", "Command sandbox", kindEnum, []string{"off", "auto", "on"}},
 	{"auto_compact", "Auto context compaction", kindEnum, []string{"on", "off"}},
 	{"context_limit", "Context window (tokens)", kindInt, nil},
 	{"max_turns", "Max tool-loop turns", kindInt, nil},
