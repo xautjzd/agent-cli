@@ -252,3 +252,20 @@ func ModelsFor(name string) []string {
 	}
 	return nil
 }
+
+// ProviderForModel returns the canonical name of the built-in provider whose
+// model list contains the given model, if any. It is used to detect when a
+// configured model belongs to a different provider than the one selected.
+func ProviderForModel(model string) (string, bool) {
+	if model == "" {
+		return "", false
+	}
+	for _, p := range presets {
+		for _, m := range p.Models {
+			if m == model {
+				return p.Name, true
+			}
+		}
+	}
+	return "", false
+}

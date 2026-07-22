@@ -423,6 +423,32 @@ func envKeyFor(providerName string) string {
 
 // resolveProfile fills connection settings from a named provider profile
 // when cfg.Provider matches one; explicit top-level values keep precedence.
+// staleForProvider reports whether a top-level model belongs to a *different*
+// provider than the active one — i.e. it is left over from a previous provider
+// and would be rejected here. A model is stale when it is another configured
+// profile's model, or a known model of a different built-in provider that this
+// provider does not list.
+func staleForProvider(cfg *Config, model string) bool {
+	if model == "" {
+		return false
+	}
+	for name, prof := range cfg.Providers {
+		if name != cfg.Provider && prof.Model == model {
+			return true
+		}
+	}
+	own := catalog.ModelsFor(cfg.Provider)
+	for _, m := range own {
+		if m == model {
+			return false // it is one of this provider's own models
+		}
+	}
+	if p, ok := catalog.ProviderForModel(model); ok && p != cfg.Provider && len(own) > 0 {
+		return true
+	}
+	return false
+}
+
 func resolveProfile(cfg *Config) {
 	p, ok := cfg.Providers[cfg.Provider]
 	if !ok {
@@ -430,6 +456,11 @@ func resolveProfile(cfg *Config) {
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = p.BaseURL
+	}
+	// A stale top-level model from a previous provider is replaced by this
+	// profile's own model so the endpoint isn't sent a foreign model id.
+	if p.Model != "" && staleForProvider(cfg, cfg.Model) {
+		cfg.Model = p.Model
 	}
 	if cfg.Model == "" {
 		cfg.Model = p.Model
@@ -468,6 +499,10 @@ func applyPreset(cfg *Config) {
 	cfg.Provider = p.Name
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = p.BaseURL
+	}
+	// Drop a stale model left over from a different provider.
+	if staleForProvider(cfg, cfg.Model) {
+		cfg.Model = ""
 	}
 	if cfg.Model == "" {
 		cfg.Model = p.DefaultModel
