@@ -85,6 +85,11 @@ type Repl struct {
 	// is a no-op (the runner tolerates a nil receiver).
 	Hooks *hook.Runner
 
+	// NonInteractive is set for one-shot/CI runs: the gate never waits for a
+	// human. A dangerous operation that would normally prompt is denied
+	// (unless bypass mode is active), so an unattended run can never hang.
+	NonInteractive bool
+
 	// VisionClient overrides the lazily built vision-fallback provider
 	// (primarily a test seam).
 	VisionClient provider.Provider

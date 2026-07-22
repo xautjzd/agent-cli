@@ -11,6 +11,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -71,10 +72,12 @@ func run(args []string) error {
 	}
 
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
-	prompt := fs.String("p", "", "run a single prompt non-interactively and exit")
+	prompt := fs.String("p", "", "run a single prompt non-interactively and exit (\"-\" reads the prompt from stdin)")
 	providerFlag := fs.String("provider", "", "override provider (anthropic, openai, deepseek, custom)")
 	modelFlag := fs.String("model", "", "override model")
 	bypass := fs.Bool("bypass", false, "permission bypass mode: no confirmations, dangerous operations are audit-logged")
+	output := fs.String("output", "text", "non-interactive output format: text or json")
+	quiet := fs.Bool("q", false, "non-interactive: print only the final answer (suppress tool activity)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -120,15 +123,142 @@ func run(args []string) error {
 	defer stop()
 
 	if *prompt != "" {
-		// One-shot mode supports @path references too.
-		expanded, err := repl.ExpandFileRefs(*prompt, workDir)
+		return runNonInteractive(ctx, sess, cfg, *prompt, *output, *quiet, *bypass)
+	}
+	return sess.Run(ctx)
+}
+
+// runNonInteractive executes one prompt and exits — the mode for PR review, CI,
+// and GitHub Actions. It never waits for a human (dangerous ops are denied
+// unless -bypass), reads the prompt or extra context from stdin, and can emit
+// machine-readable JSON.
+//
+// Usage patterns:
+//
+//	agent -p "review the staged diff; list bugs and security issues"
+//	git diff origin/main | agent -p "review this diff" -q
+//	echo "summarize @CHANGELOG.md" | agent -p -
+//	agent -p "audit @config.go" -output json | jq .result
+func runNonInteractive(ctx context.Context, sess *repl.Repl, cfg *config.Config, prompt, format string, quiet, bypass bool) error {
+	// Resolve the prompt: "-" reads it entirely from stdin; a normal prompt
+	// with piped stdin appends that stdin as context (e.g. a diff).
+	text := prompt
+	if prompt == "-" {
+		b, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return err
 		}
-		_, err = sess.Agent.Run(ctx, expanded)
+		text = string(b)
+	} else if !isTTY(os.Stdin) {
+		if b, _ := io.ReadAll(os.Stdin); len(bytes.TrimSpace(b)) > 0 {
+			text += "\n\n--- input from stdin ---\n" + string(b)
+		}
+	}
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("empty prompt")
+	}
+
+	// No human is present: bypass auto-approves (audited), otherwise dangerous
+	// operations are denied rather than blocking.
+	if bypass {
+		sess.Mode = permission.ModeBypass
+	} else {
+		sess.NonInteractive = true
+	}
+
+	jsonMode := format == "json"
+	if format != "text" && format != "json" {
+		return fmt.Errorf("unknown -output %q (use text or json)", format)
+	}
+	// Keep stdout for the result only: the gate's diagnostics go to stderr.
+	sess.Out = os.Stderr
+	sink := &ciSink{out: os.Stdout, errw: os.Stderr, quiet: quiet, silent: jsonMode}
+	sess.Agent.Events = sink
+
+	expanded, err := repl.ExpandFileRefs(text, sess.WorkDir)
+	if err != nil {
 		return err
 	}
-	return sess.Run(ctx)
+	start := time.Now()
+	answer, runErr := sess.Agent.Run(ctx, expanded)
+
+	if jsonMode {
+		res := map[string]any{
+			"result":           answer,
+			"provider":         cfg.Provider,
+			"model":            cfg.Model,
+			"input_tokens":     sink.stats.PromptTokens,
+			"output_tokens":    sink.stats.CompletionTokens,
+			"rounds":           sink.stats.Rounds,
+			"duration_seconds": round2(time.Since(start).Seconds()),
+		}
+		if c, ok := usage.Cost(cfg.Provider, cfg.Model, sink.stats.PromptTokens, sink.stats.CompletionTokens); ok {
+			res["cost_usd"] = round2(c)
+		}
+		if runErr != nil {
+			res["error"] = runErr.Error()
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(res)
+	}
+	return runErr
+}
+
+func round2(f float64) float64 { return float64(int64(f*100+0.5)) / 100 }
+
+// isTTY reports whether f is an interactive terminal.
+func isTTY(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
+
+// ciSink renders agent activity for non-interactive runs: the final answer goes
+// to stdout (so it is cleanly pipeable), tool activity to stderr (so it stays
+// out of the captured result), and nothing at all in quiet mode. In JSON mode
+// the answer is withheld from stdout (returned in the JSON object instead).
+type ciSink struct {
+	out      io.Writer // stdout
+	errw     io.Writer // stderr
+	quiet    bool      // suppress tool activity
+	silent   bool      // JSON mode: don't stream the answer to stdout
+	stats    agent.TurnStats
+	streamed bool
+}
+
+func (s *ciSink) answerW() io.Writer {
+	if s.silent {
+		return io.Discard
+	}
+	return s.out
+}
+func (s *ciSink) toolW() io.Writer {
+	if s.quiet || s.silent {
+		return io.Discard
+	}
+	return s.errw
+}
+
+func (s *ciSink) OnUserPrompt(string)      {}
+func (s *ciSink) OnThinking(string)        {}
+func (s *ciSink) OnAssistantText(t string) { fmt.Fprintln(s.answerW(), t) }
+func (s *ciSink) OnToolCall(name, args string) {
+	fmt.Fprintf(s.toolW(), "● %s(%s)\n", camelName(name), compactArgs(args))
+}
+func (s *ciSink) OnToolResult(name, result string, ok bool) {
+	mark := "✓"
+	if !ok {
+		mark = "✗"
+	}
+	fmt.Fprintf(s.toolW(), "  %s %s\n", mark, truncateOneLine(result, 200))
+}
+func (s *ciSink) OnTurnStats(st agent.TurnStats) { s.stats = st }
+
+// Streaming: write answer fragments live to stdout (unless JSON/silent).
+func (s *ciSink) OnThinkingDelta(string)    {}
+func (s *ciSink) OnAssistantDelta(t string) { s.streamed = true; fmt.Fprint(s.answerW(), t) }
+func (s *ciSink) OnStreamEnd() {
+	if s.streamed && !s.silent {
+		fmt.Fprintln(s.out)
+	}
+	s.streamed = false
 }
 
 // buildSession wires all dependencies together. This is the composition
@@ -249,7 +379,7 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	// extension points.
 	ag.Hooks = r
 	if sbox.Available() {
-		fmt.Fprintf(os.Stdout, "\033[2m● sandbox: %s\033[0m\n", sbox.Reason())
+		fmt.Fprintf(os.Stderr, "\033[2m● sandbox: %s\033[0m\n", sbox.Reason())
 	}
 	// The REPL is the permission gate: dangerous tool calls are confirmed
 	// (HITL) or audit-logged (bypass) before execution — for the main agent

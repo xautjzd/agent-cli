@@ -486,6 +486,62 @@ Usage · this project · all time
   ```
   When a model is unpriced, `/usage` lists it with a copy-pasteable `"prices"` snippet.
 
+## Non-interactive mode (CI, PR review, GitHub Actions)
+
+`agent -p "<prompt>"` runs a single prompt and exits — no TUI, no prompts. It's built for
+automation: **it never waits for a human**, so it can't hang in CI.
+
+```bash
+agent -p "review the staged diff; list bugs, security issues, and style problems"
+git diff origin/main | agent -p "review this diff" -q     # pipe context on stdin
+echo "summarize @CHANGELOG.md" | agent -p -                # "-" reads the prompt from stdin
+agent -p "audit @internal/config" -output json | jq -r .result
+```
+
+- **Input** — a normal `-p "…"` prompt; `-p -` reads the whole prompt from stdin; and when
+  stdin is piped alongside a `-p` prompt, that stdin (a diff, a log) is appended as context.
+  `@path` references work as usual.
+- **Permissions** — with no human to approve, a dangerous operation is **denied** rather than
+  blocking (safe default for read-only review). Pass **`-bypass`** to auto-approve and
+  audit-log dangerous operations for autonomous runs.
+- **Output** — the final answer goes to **stdout** (cleanly pipeable); tool activity goes to
+  **stderr**; `-q` suppresses tool activity. **`-output json`** emits a structured object
+  (`result`, `provider`, `model`, `input_tokens`, `output_tokens`, `rounds`,
+  `duration_seconds`, `cost_usd`, and `error` on failure) — stdout is JSON only.
+- **Exit code** — `0` on success, non-zero on error (a failed API call, denied-required
+  operation, etc.), so a workflow step fails loudly.
+
+### GitHub Actions: PR review
+
+```yaml
+name: agent-review
+on: pull_request
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install agent-cli
+        run: go install github.com/xautjzd/agent-cli/cmd/agent@latest
+      - name: Review the diff
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}   # or ANTHROPIC_API_KEY, etc.
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD \
+            | agent -p "You are a senior reviewer. Review this diff and list concrete
+                        correctness, security, and style issues with file:line references.
+                        End with APPROVE or REQUEST_CHANGES." -q \
+            | tee review.md
+      - name: Post as a PR comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with: { path: review.md }
+```
+
+The review runs read-only (no `-bypass`), so the agent can `git diff`/`grep`/read files but
+any accidental mutation is denied. Gate the merge on the output by grepping for
+`REQUEST_CHANGES`, or use `-output json` and parse `.result`.
+
 ## Configuration
 
 Layered precedence, modeled on Claude Code / codex / opencode:

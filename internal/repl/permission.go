@@ -71,6 +71,17 @@ func (r *Repl) BeforeToolCall(name, args string) (bool, string) {
 		return true, rec.Note()
 	}
 
+	// Non-interactive (one-shot/CI): there is no human to ask, so a dangerous
+	// operation is denied rather than hanging. The model is told how to
+	// proceed, and the decision is audited.
+	if r.NonInteractive {
+		fmt.Fprintf(r.Out, "\n⛔ denied (non-interactive): %s — %s\n", name, decision.Reason)
+		rec.Decision, rec.Approved = permission.ActionDeny, false
+		r.audit(rec)
+		return false, "Error: denied — dangerous operations require approval, unavailable in " +
+			"non-interactive mode. Re-run with -bypass to allow, or use a safer approach."
+	}
+
 	// HITL: show the details (and a diff preview for file edits), then prompt.
 	fmt.Fprintf(r.Out, "\n\033[33m⚠ Approval required\033[0m\n  tool: %s\n  reason: %s\n",
 		name, decision.Reason)
