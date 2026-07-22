@@ -145,8 +145,7 @@ func init() {
 		{"help", "/help", "List commands and installed skills", (*Repl).cmdHelp},
 		{"model", "/model [name]", "Show or switch the model", (*Repl).cmdModel},
 		{"provider", "/provider <name> [model]", "Switch provider (anthropic, openai, deepseek, custom)", (*Repl).cmdProvider},
-		{"skill", "/skill <name> [task]", "Explicitly run a skill, optionally with a task", (*Repl).cmdSkill},
-		{"skills", "/skills", "List installed skills", (*Repl).cmdSkills},
+		{"skills", "/skills", "List installed skills (run one with /<skill-name> [task])", (*Repl).cmdSkills},
 		{"tools", "/tools", "List available tools", (*Repl).cmdTools},
 		{"mcp", "/mcp", "List connected MCP servers and their tools", (*Repl).cmdMCP},
 		{"agents", "/agents", "List subagent types the task tool can delegate to", (*Repl).cmdAgents},
@@ -156,7 +155,6 @@ func init() {
 		{"goal", "/goal [text|clear]", "Set a session goal the agent works toward until met", (*Repl).cmdGoal},
 		{"plan", "/plan [task|off]", "Plan mode: explore read-only, propose a plan, implement on approval", (*Repl).cmdPlan},
 		{"mode", "/mode [hitl|bypass]", "Show or switch the permission mode for dangerous operations", (*Repl).cmdMode},
-		{"security", "/security", "Show the active security settings (mode, posture, rules, sandbox, audit)", (*Repl).cmdSecurity},
 		{"usage", "/usage", "Show token usage, timing, and context occupancy", (*Repl).cmdUsage},
 		{"rename", "/rename [title]", "Rename the current session", (*Repl).cmdRename},
 		{"new", "/new", "Start a new session (current one stays resumable)", (*Repl).cmdNew},
@@ -893,14 +891,6 @@ func (r *Repl) listProviders() error {
 	}
 	textwidth.WriteList(r.Out, rows, avail, 1)
 	return nil
-}
-
-func (r *Repl) cmdSkill(ctx context.Context, args string) error {
-	if args == "" {
-		return fmt.Errorf("usage: /skill <name> [task]")
-	}
-	name, task, _ := strings.Cut(args, " ")
-	return r.invokeSkill(ctx, name, strings.TrimSpace(task))
 }
 
 func (r *Repl) cmdSkills(_ context.Context, _ string) error {

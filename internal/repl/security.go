@@ -1,9 +1,7 @@
 package repl
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -119,40 +117,3 @@ func pathGlobForDir(path, workDir string) string {
 
 // regexpEscape quotes a string for safe inclusion in a regular expression.
 func regexpEscape(s string) string { return regexp.QuoteMeta(s) }
-
-// cmdSecurity prints the effective security configuration so the user can see,
-// at a glance, what is enforced this session.
-func (r *Repl) cmdSecurity(_ context.Context, _ string) error {
-	fmt.Fprintln(r.Out, "Security settings:")
-	fmt.Fprintf(r.Out, "  permission mode : %s\n", r.permMode())
-	posture := "standard"
-	if r.Cfg != nil && r.Cfg.BashPolicy == "strict" {
-		posture = "strict"
-	}
-	fmt.Fprintf(r.Out, "  bash posture    : %s\n", posture)
-
-	sandbox := "off"
-	if r.SandboxActive {
-		sandbox = "on (active)"
-	} else if r.Cfg != nil && r.Cfg.Sandbox != "" && r.Cfg.Sandbox != "off" {
-		sandbox = r.Cfg.Sandbox + " (requested, inactive — no backend)"
-	}
-	fmt.Fprintf(r.Out, "  command sandbox : %s\n", sandbox)
-
-	if path := r.Audit.Path(); path != "" {
-		fmt.Fprintf(r.Out, "  audit log       : %s\n", path)
-	} else {
-		fmt.Fprintln(r.Out, "  audit log       : (disabled)")
-	}
-
-	rules := r.policyOrDefault().Rules()
-	if len(rules) == 0 {
-		fmt.Fprintln(r.Out, "  approval rules  : none (built-in risk classifier only)")
-	} else {
-		fmt.Fprintf(r.Out, "  approval rules  : %d\n", len(rules))
-		for _, d := range rules {
-			fmt.Fprintf(r.Out, "      • %s\n", d)
-		}
-	}
-	return nil
-}

@@ -164,16 +164,6 @@ func TestDispatchSkillFallback(t *testing.T) {
 	}
 }
 
-func TestDispatchExplicitSkillCommand(t *testing.T) {
-	r, stub, _ := newTestRepl(t, "")
-	if err := r.dispatch(context.Background(), "/skill demo"); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(stub.last.Messages[len(stub.last.Messages)-1].Content, "Do demo steps.") {
-		t.Error("explicit /skill did not embed instructions")
-	}
-}
-
 func TestDispatchUnknown(t *testing.T) {
 	r, _, _ := newTestRepl(t, "")
 	if err := r.dispatch(context.Background(), "/nonsense"); err == nil {

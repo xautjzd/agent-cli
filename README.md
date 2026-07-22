@@ -160,8 +160,7 @@ picker instead. Commands:
 | `/help` | List commands, skills, and usage hints |
 | `/model [name]` | Show or switch the model mid-session |
 | `/provider <name> [model]` | Switch provider mid-session (history preserved; credentials re-resolved) |
-| `/skill <name> [task]` | Explicitly run a skill, optionally with a task |
-| `/<skill-name> [task]` | Shorthand — any installed skill works as a slash command |
+| `/<skill-name> [task]` | Run any installed skill as a slash command, optionally with a task |
 | `/skills` | List installed skills (aligned; `agent skill show <name>` for full text) |
 | `/tools` | List available tools (aligned two-column layout) |
 | `/mcp` | List connected MCP servers, their transport, and the tools each contributed |
@@ -172,7 +171,6 @@ picker instead. Commands:
 | `/goal <text>` | Set a session goal the agent keeps working toward until met (`/goal` shows it, `/goal clear` drops it) |
 | `/plan [task]` | Plan mode: explore read-only, propose a plan, implement on approval (`/plan off` exits) |
 | `/mode [hitl\|bypass]` | Show or switch the permission mode for dangerous operations |
-| `/security` | Show active security settings (mode, bash posture, rules, sandbox, audit log) |
 | `/usage` | Show session token totals, model time, and current context occupancy |
 | `/compact` | Summarize earlier turns to free up context now (also runs automatically) |
 | `/rename [title]` | Rename the current session (no argument prompts for one) |
@@ -339,7 +337,7 @@ project directory. Two modes decide what happens:
 Switch with `/mode bypass` / `/mode hitl`, or start one-shot runs with `agent -bypass -p "..."`.
 **An active `/goal` always runs in bypass mode** (goal pursuit must not stall on
 confirmations); the effective mode reverts when the goal clears. `/config` shows the
-effective mode. Run **`/security`** to see the full active configuration.
+effective mode.
 
 ### Hardened command classification
 
@@ -396,7 +394,7 @@ silent when no backend is present):
 Every gated decision — approved, denied, or auto-approved in bypass — is appended as a
 JSON line to a per-project audit log (`~/.agent/projects/<encoded>/audit.log`), with the
 time, tool, full arguments, decision, reason, matched rule, mode, cwd, and whether the
-command was sandboxed. `/security` prints its path. This is a durable record, separate
+command was sandboxed. This is a durable record, separate
 from the in-context note the model sees.
 
 ### Output rendering
