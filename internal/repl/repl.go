@@ -29,6 +29,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/subagent"
 	"github.com/xautjzd/agent-cli/internal/textwidth"
 	"github.com/xautjzd/agent-cli/internal/tool"
+	"github.com/xautjzd/agent-cli/internal/usage"
 )
 
 // errExit signals a clean user-requested shutdown of the loop.
@@ -1041,15 +1042,138 @@ func (r *Repl) cmdCompact(ctx context.Context, _ string) error {
 
 // cmdUsage reports cumulative token/time consumption and the current
 // context occupancy (estimated from the latest request's usage).
+// usageRow is one aligned row of the /usage tables.
+type usageRow struct{ name, tok, in, out, cost string }
+
 func (r *Repl) cmdUsage(_ context.Context, _ string) error {
-	tokens, dur, ctxTokens := r.Agent.Stats()
-	ctxNote := fmt.Sprintf("%d tokens", ctxTokens)
-	if ctxTokens == 0 {
-		ctxNote = "unknown until the next model reply"
+	const (
+		bold  = "\033[1m"
+		dim   = "\033[2m"
+		reset = "\033[0m"
+		cyan  = "\033[36m"
+	)
+	rec := r.Agent.Usage
+
+	if rec != nil {
+		if in, out, reqs, dur, cost, priced := rec.Totals(); in+out > 0 {
+			fmt.Fprintf(r.Out, "\n%s%sUsage%s %s· this project · all time%s\n\n", bold, cyan, reset, dim, reset)
+
+			// Label/value summary block, labels padded to a common width.
+			lbl := func(k, v string) {
+				fmt.Fprintf(r.Out, "  %s   %s\n", textwidth.Pad(k, 11), v)
+			}
+			lbl("Total cost", bold+money(cost, priced)+reset)
+			lbl("Tokens", fmt.Sprintf("%s  %s(%s in · %s out)%s", abbrevTok(in+out), dim, abbrevTok(in), abbrevTok(out), reset))
+			lbl("Requests", strconv.Itoa(reqs))
+			lbl("Model time", dur.Round(time.Second).String())
+
+			// Build aligned rows for both breakdowns.
+			rows := func(es []usage.Entry, nameOf func(usage.Entry) string) []usageRow {
+				out := make([]usageRow, len(es))
+				for i, e := range es {
+					out[i] = usageRow{nameOf(e), abbrevTok(e.Tokens()), abbrevTok(e.Input), abbrevTok(e.Output), money(e.Cost, e.Priced)}
+				}
+				return out
+			}
+			models := rec.ByModel()
+			r.printUsageTable("By model", rows(models, func(e usage.Entry) string { return e.Model }))
+			r.printUsageTable("By provider", rows(rec.ByProvider(), func(e usage.Entry) string { return e.Provider }))
+
+			// List any unpriced models with a copy-pasteable config hint, so
+			// "cost is —" is actionable rather than mysterious.
+			var unpriced []string
+			for _, e := range models {
+				if !e.Priced {
+					unpriced = append(unpriced, e.Model)
+				}
+			}
+			if len(unpriced) > 0 {
+				fmt.Fprintf(r.Out, "\n  %sno price found (models.dev/config) for: %s%s\n", dim, strings.Join(unpriced, ", "), reset)
+				fmt.Fprintf(r.Out, "  %sset it in config.json to see cost, e.g.:%s\n", dim, reset)
+				fmt.Fprintf(r.Out, "  %s  \"prices\": { %q: { \"input\": 0.5, \"output\": 1.5 } }%s\n", dim, unpriced[0], reset)
+			} else {
+				fmt.Fprintf(r.Out, "\n  %scost from models.dev prices (config \"prices\" overrides as needed)%s\n", dim, reset)
+			}
+		}
 	}
-	fmt.Fprintf(r.Out, "session tokens: %d\nmodel time: %s\ncontext occupancy: %s\n",
-		tokens, dur.Round(100*time.Millisecond), ctxNote)
+
+	// Current session snapshot.
+	tokens, dur, ctxTokens := r.Agent.Stats()
+	ctxNote := abbrevTok(ctxTokens)
+	if ctxTokens == 0 {
+		ctxNote = "unknown until the next reply"
+	}
+	fmt.Fprintf(r.Out, "\n  %sThis session%s   %s tok · %s · context %s\n",
+		dim, reset, abbrevTok(tokens), dur.Round(100*time.Millisecond), ctxNote)
 	return nil
+}
+
+// printUsageTable renders a titled, column-aligned usage breakdown:
+//
+//	<name>   <tok> tok   <in> → <out>   <cost>
+func (r *Repl) printUsageTable(title string, rows []usageRow) {
+	const dim, reset = "\033[2m", "\033[0m"
+	if len(rows) == 0 {
+		return
+	}
+	var nameW, tokW, inW, outW, costW int
+	for _, row := range rows {
+		nameW = max(nameW, textwidth.Width(row.name))
+		tokW = max(tokW, textwidth.Width(row.tok))
+		inW = max(inW, textwidth.Width(row.in))
+		outW = max(outW, textwidth.Width(row.out))
+		costW = max(costW, textwidth.Width(row.cost))
+	}
+	fmt.Fprintf(r.Out, "\n  %s%s%s\n", dim, title, reset)
+	for _, row := range rows {
+		fmt.Fprintf(r.Out, "    %s   %s tok   %s %s→%s %s   %s\n",
+			textwidth.Pad(row.name, nameW),
+			textwidth.PadLeft(row.tok, tokW),
+			textwidth.PadLeft(row.in, inW),
+			dim, reset,
+			textwidth.PadLeft(row.out, outW),
+			textwidth.PadLeft(row.cost, costW),
+		)
+	}
+}
+
+// abbrevTok renders a token count compactly (1.2k, 3.4m), like Claude Code.
+func abbrevTok(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fm", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1e3)
+	default:
+		return strconv.Itoa(n)
+	}
+}
+
+// money renders an estimated cost; an unpriced entry shows "—", and a
+// partially-priced subtotal flags the estimate with "+". Small amounts get
+// more decimals so cheap usage doesn't collapse to "$0.00".
+func money(cost float64, priced bool) string {
+	if cost == 0 && !priced {
+		return "—"
+	}
+	var s string
+	switch {
+	case cost > 0 && cost < 1:
+		s = fmt.Sprintf("$%.4f", cost)
+	default:
+		s = fmt.Sprintf("$%.2f", cost)
+	}
+	if !priced {
+		s += "+"
+	}
+	return s
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func (r *Repl) cmdExit(_ context.Context, _ string) error { return errExit }

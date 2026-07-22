@@ -12,6 +12,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/tool"
+	"github.com/xautjzd/agent-cli/internal/usage"
 )
 
 // Events allows the UI layer to observe the loop without the loop knowing
@@ -123,6 +124,9 @@ type Agent struct {
 	// Summarizer produces compaction summaries; nil defaults to one backed
 	// by this agent's provider and model.
 	Summarizer Summarizer
+	// Usage, when set, records per-turn token consumption and cost keyed by
+	// provider and model (shared across sessions and subagents).
+	Usage *usage.Recorder
 
 	messages []provider.Message
 
@@ -394,6 +398,11 @@ func (a *Agent) finishTurn(stats *TurnStats, start time.Time) {
 	a.sessionDuration += stats.Duration
 	stats.SessionTokens = a.sessionTokens
 	stats.SessionDuration = a.sessionDuration
+	// Record cross-session usage keyed by the provider and model that served
+	// this turn (constant within a turn — no mid-turn switch).
+	if a.Usage != nil && (stats.PromptTokens > 0 || stats.CompletionTokens > 0) {
+		a.Usage.Record(a.Provider.Name(), a.Model, stats.PromptTokens, stats.CompletionTokens, stats.Duration)
+	}
 	if a.Events != nil {
 		a.Events.OnTurnStats(*stats)
 	}

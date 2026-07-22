@@ -26,6 +26,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/agent"
 	"github.com/xautjzd/agent-cli/internal/config"
+	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/hook"
 	"github.com/xautjzd/agent-cli/internal/mcp"
 	"github.com/xautjzd/agent-cli/internal/memory"
@@ -37,6 +38,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/skill"
 	"github.com/xautjzd/agent-cli/internal/subagent"
 	"github.com/xautjzd/agent-cli/internal/textwidth"
+	"github.com/xautjzd/agent-cli/internal/usage"
 
 	"github.com/xautjzd/agent-cli/internal/tool"
 	"golang.org/x/term"
@@ -204,9 +206,25 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 		}
 	}
 
+	// Cross-session usage/cost tracking, shared with subagents so delegated
+	// work counts toward the project totals. Prices come from models.dev
+	// (loaded from cache instantly, refreshed in the background), with
+	// config-supplied prices as a backstop and a built-in table for offline.
+	usage.InitModelsDev(home.Path("models-dev-prices.json"))
+	if len(cfg.Prices) > 0 {
+		reg := make(map[string]usage.Price, len(cfg.Prices))
+		for model, p := range cfg.Prices {
+			reg[model] = usage.Price{InputPerM: p.Input, OutputPerM: p.Output}
+		}
+		usage.RegisterPrices(reg)
+	}
+	usageRec := usage.NewRecorder(session.UsagePath(workDir))
+	spawner.Usage = usageRec
+
 	ag := agent.New(p, cfg.Model, registry, systemPrompt, newTerminalEvents(), cfg.MaxTurns)
 	ag.AutoCompact = cfg.AutoCompact != "off"
 	ag.ContextLimit = cfg.ContextLimit
+	ag.Usage = usageRec
 	// Subagents inherit the parent's current provider/model, so a mid-session
 	// /provider or /model switch applies to delegated work too.
 	spawner.Parent = ag

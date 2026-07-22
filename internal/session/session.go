@@ -124,6 +124,11 @@ func AuditLogPath(projectDir string) string {
 	return home.Path("projects", EncodeProjectPath(projectDir), "audit.log")
 }
 
+// UsagePath returns the user-level usage/cost totals file for one project.
+func UsagePath(projectDir string) string {
+	return home.Path("projects", EncodeProjectPath(projectDir), "usage.json")
+}
+
 // EncodeProjectPath turns an absolute project path into a single directory
 // name by replacing path separators with dashes, so the origin stays
 // legible when browsing the agent home.

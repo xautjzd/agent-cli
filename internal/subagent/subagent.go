@@ -29,6 +29,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/agent"
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/tool"
+	"github.com/xautjzd/agent-cli/internal/usage"
 )
 
 // Definition describes one subagent type the model may delegate to. A type
@@ -83,6 +84,9 @@ type Spawner struct {
 	// subagent act without confirmation (it runs unattended); audit notes, if
 	// any, land in its returned report.
 	Gate agent.Gate
+	// Usage, when set, records subagent token consumption into the shared
+	// recorder so delegated work counts toward the totals.
+	Usage *usage.Recorder
 }
 
 // definition resolves a requested type name, falling back to the
@@ -135,6 +139,7 @@ func (s *Spawner) Run(ctx context.Context, typeName, taskPrompt string) (string,
 	}
 	child := agent.New(prov, model, reg, def.Prompt, events, s.MaxTurns)
 	child.Gate = s.Gate
+	child.Usage = s.Usage
 	// A subagent never compacts: it is short-lived and its whole point is to
 	// keep its context out of the parent, so it just runs to completion.
 

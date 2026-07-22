@@ -39,7 +39,7 @@ func TestUsageCommand(t *testing.T) {
 	if err := r.dispatch(context.Background(), "/usage"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "unknown until the next model reply") {
+	if !strings.Contains(out.String(), "unknown until the next reply") {
 		t.Errorf("expected unknown context note: %s", out.String())
 	}
 
@@ -51,7 +51,7 @@ func TestUsageCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "session tokens: 15") || !strings.Contains(got, "context occupancy: 15 tokens") {
+	if !strings.Contains(got, "This session") || !strings.Contains(got, "15 tok") || !strings.Contains(got, "context 15") {
 		t.Errorf("usage output wrong:\n%s", got)
 	}
 }

@@ -108,6 +108,17 @@ type Config struct {
 	// hook package), keyed by event name. It integrates the agent with
 	// third-party systems (linters, notifiers, policy engines).
 	Hooks map[string][]HookConfig `json:"hooks,omitempty"`
+	// Prices sets per-model token prices (USD per 1M tokens) for /usage cost
+	// estimation, keyed by model name. They override the built-in price table,
+	// so any model — including ones the built-in table doesn't know — can be
+	// priced.
+	Prices map[string]PriceConfig `json:"prices,omitempty"`
+}
+
+// PriceConfig is a model's price in USD per one million tokens.
+type PriceConfig struct {
+	Input  float64 `json:"input"`
+	Output float64 `json:"output"`
 }
 
 // HookConfig is one configured hook command for an event. Matcher, when set,
@@ -364,6 +375,12 @@ func mergeFile(cfg *Config, path string) error {
 			cfg.Hooks = map[string][]HookConfig{}
 		}
 		cfg.Hooks[event] = append(cfg.Hooks[event], hooks...)
+	}
+	for model, price := range layer.Prices {
+		if cfg.Prices == nil {
+			cfg.Prices = map[string]PriceConfig{}
+		}
+		cfg.Prices[model] = price
 	}
 	return nil
 }

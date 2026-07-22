@@ -171,7 +171,7 @@ picker instead. Commands:
 | `/goal <text>` | Set a session goal the agent keeps working toward until met (`/goal` shows it, `/goal clear` drops it) |
 | `/plan [task]` | Plan mode: explore read-only, propose a plan, implement on approval (`/plan off` exits) |
 | `/mode [hitl\|bypass]` | Show or switch the permission mode for dangerous operations |
-| `/usage` | Show session token totals, model time, and current context occupancy |
+| `/usage` | Usage & cost: all-time totals + per-model/provider breakdown, plus this session |
 | `/compact` | Summarize earlier turns to free up context now (also runs automatically) |
 | `/rename [title]` | Rename the current session (no argument prompts for one) |
 | `/new` | Start a new session (the current one stays resumable) |
@@ -434,8 +434,57 @@ from the in-context note the model sees.
   ⏱ 2.4s · turn: 3,023 in + 123 out (2 rounds) · context: 1,602 tok · session: 3,146 tok, 2.4s
   ```
 
-  `/usage` shows the session summary on demand. `/clear` and `/new` reset the context
-  estimate (it reads "unknown" until the next model reply).
+  `/clear` and `/new` reset the context estimate (it reads "unknown" until the next model
+  reply).
+
+### Usage & cost tracking
+
+`/usage` reports token consumption and **estimated cost** the way Claude Code's Usage panel
+does — **all-time for the project** (persisted across sessions), broken down **by model** and
+**by provider**, plus the current session:
+
+```
+Usage · this project · all time
+
+  Total cost    $401.23
+  Tokens        1.1m  (27.1k in · 1.0m out)
+  Requests      72
+  Model time    4h30m36s
+
+  By model
+    claude-opus-4-8   738.9k tok   17.2k → 721.7k   $287.69
+    claude-fable-5    307.0k tok    4.9k → 302.1k   $113.54
+    glm-4.6            13.0k tok    5.0k →   8.0k         —
+  By provider
+    anthropic    1.0m tok   22.1k → 1.0m   $401.23
+    deepseek    13.0k tok    5.0k → 8.0k         —
+
+  This session   15.2k tok · 12.3s · context 15.2k
+```
+
+- Totals accumulate to `~/.agent/projects/<encoded>/usage.json`, so "total consumed" survives
+  restarts; **subagent** turns count toward the totals too (shared recorder).
+- Prices come from **[models.dev](https://models.dev)** (the primary source, kept current):
+  the catalog is cached at `~/.agent/models-dev-prices.json`, loaded instantly on startup and
+  refreshed in the background (24h TTL) — so it never blocks startup and works offline from the
+  last cache. Because the same model id is listed under many providers (first-party + gateways)
+  at different prices, the price is matched by **your provider**; when the provider is unknown,
+  the model's **most-common** (first-party) price is used, not an inflated gateway rate.
+- **Config `prices` as a backstop** for models models.dev doesn't cover, and a small **built-in
+  table** for offline first runs. A model with no price anywhere shows **`—`** — its tokens
+  still count. Config prices (USD per 1M tokens) are keyed by model; because cost is derived
+  from stored tokens on every read, a newly available price **retroactively costs
+  already-accumulated usage**:
+
+  ```jsonc
+  {
+    "prices": {
+      "deepseek-v4-pro": { "input": 0.28, "output": 1.14 },
+      "glm-4.6":         { "input": 0.60, "output": 2.20 }
+    }
+  }
+  ```
+  When a model is unpriced, `/usage` lists it with a copy-pasteable `"prices"` snippet.
 
 ## Configuration
 
