@@ -2,6 +2,8 @@ package repl
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -151,6 +153,51 @@ func TestTUISelectOverlayArrowPick(t *testing.T) {
 	}
 	if m.pick != nil {
 		t.Error("overlay should close after Enter")
+	}
+}
+
+func TestTUIEnterRunsSelectedCommand(t *testing.T) {
+	m := newTestTUI(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Type "/mo" so the menu highlights "/model", then Enter runs it directly
+	// (accept + submit) — no second Enter needed.
+	for _, r := range "/mo" {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if len(m.cands) == 0 || m.cands[m.sel].text != "/model" {
+		t.Fatalf("menu not highlighting /model: %+v", m.cands)
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.busy || cmd == nil {
+		t.Error("Enter on a selected command should submit immediately")
+	}
+	if !strings.Contains(m.sb.String(), "/model") {
+		t.Errorf("command not echoed/submitted: %q", m.sb.String())
+	}
+}
+
+func TestTUIEnterOnFileCompletionFillsOnly(t *testing.T) {
+	m := newTestTUI(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	// Create a file so @-completion has a candidate.
+	if err := os.WriteFile(filepath.Join(m.repl.WorkDir, "notes.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m.repl.fileCache = nil
+	for _, r := range "see @not" {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if len(m.cands) == 0 || !strings.HasPrefix(m.cands[m.sel].text, "@") {
+		t.Fatalf("expected a @file candidate: %+v", m.cands)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// A file completion only fills in — it must NOT submit.
+	if m.busy {
+		t.Error("Enter on a @file completion should not submit")
+	}
+	if !strings.Contains(m.input.Value(), "@notes.md") {
+		t.Errorf("file not accepted into input: %q", m.input.Value())
 	}
 }
 

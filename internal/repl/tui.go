@@ -420,6 +420,12 @@ func (m *tuiModel) handleIdleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		if c, ok := m.selectedCand(); ok && m.wouldChange(c) {
 			m.acceptCand(c)
+			// A highlighted slash command runs immediately on Enter (Tab
+			// completes it instead, so arguments can be added). A @file
+			// completion is only filled in — the message is still being typed.
+			if strings.HasPrefix(c.text, "/") {
+				return m.submit()
+			}
 			return m, nil
 		}
 		return m.submit()
