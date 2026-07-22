@@ -55,6 +55,7 @@ type refreshMsg struct{}             // scrollback changed; re-render the viewpo
 type turnDoneMsg struct{ done bool } // a turn finished (done => quit)
 type askMsg struct {                 // a mid-turn text prompt needs answering
 	prompt string
+	secret bool // mask the input (API keys, passwords)
 	reply  chan tuiReply
 }
 type tuiReply struct {
@@ -160,12 +161,14 @@ func (r *Repl) runTUI(ctx context.Context) error {
 	oldEvents := r.Agent.Events
 	r.Agent.Events = newTUIEvents(sb)
 	r.tuiAsk = m.requestInput
+	r.tuiAskSecret = m.requestSecret
 	r.tuiSelect = m.requestSelect
 	r.useTUI = false // in-model overlays replace the old nested-program pickers
 	defer func() {
 		r.Out = realOut
 		r.Agent.Events = oldEvents
 		r.tuiAsk = nil
+		r.tuiAskSecret = nil
 		r.tuiSelect = nil
 	}()
 
@@ -176,8 +179,17 @@ func (r *Repl) runTUI(ctx context.Context) error {
 // requestInput services readInput from within the running program: it posts an
 // ask prompt and blocks the calling (turn) goroutine until the user answers.
 func (m *tuiModel) requestInput(prompt string) (string, bool) {
+	return m.ask2(prompt, false)
+}
+
+// requestSecret is requestInput with a masked echo (for API keys).
+func (m *tuiModel) requestSecret(prompt string) (string, bool) {
+	return m.ask2(prompt, true)
+}
+
+func (m *tuiModel) ask2(prompt string, secret bool) (string, bool) {
 	reply := make(chan tuiReply, 1)
-	m.program.Send(askMsg{prompt: prompt, reply: reply})
+	m.program.Send(askMsg{prompt: prompt, secret: secret, reply: reply})
 	r := <-reply
 	return r.text, r.ok
 }
@@ -207,10 +219,16 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case askMsg:
-		// A mid-turn prompt: focus a fresh answer field at the bottom.
+		// A mid-turn prompt: focus a fresh answer field at the bottom, masking
+		// the echo for secrets (API keys).
 		m.ask = &msg
 		m.input.SetValue("")
 		m.input.Prompt = "  " + strings.TrimSpace(msg.prompt) + " "
+		if msg.secret {
+			m.input.EchoMode = textinput.EchoPassword
+		} else {
+			m.input.EchoMode = textinput.EchoNormal
+		}
 		m.input.Focus()
 		m.cands = nil
 		return m, nil
@@ -393,12 +411,14 @@ func (m *tuiModel) handleAskKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ask.reply <- tuiReply{text: val, ok: true}
 		m.ask = nil
 		m.input.SetValue("")
+		m.input.EchoMode = textinput.EchoNormal
 		m.input.Prompt = m.workingPrompt()
 		return m, nil
 	case tea.KeyCtrlC:
 		m.ask.reply <- tuiReply{ok: false}
 		m.ask = nil
 		m.input.SetValue("")
+		m.input.EchoMode = textinput.EchoNormal
 		return m, nil
 	}
 	var cmd tea.Cmd

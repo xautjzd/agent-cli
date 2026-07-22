@@ -159,7 +159,7 @@ picker instead. Commands:
 |---------|--------|
 | `/help` | List commands, skills, and usage hints |
 | `/model [name]` | Show or switch the model mid-session |
-| `/provider <name> [model]` | Switch provider mid-session (history preserved; credentials re-resolved) |
+| `/provider <name> [model]` | Switch provider mid-session (prompts for the API key if none is set, and offers to save it) |
 | `/<skill-name> [task]` | Run any installed skill as a slash command, optionally with a task |
 | `/skills` | List installed skills (aligned; `agent skill show <name>` for full text) |
 | `/tools` | List available tools (aligned two-column layout) |

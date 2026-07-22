@@ -676,6 +676,44 @@ func (c *Config) Save() error {
 	return c.saveTo(path)
 }
 
+// SaveProviderKey persists an API key for a provider as a named profile in the
+// chosen scope, filling the connection details (base URL, wire format, auth)
+// from the built-in catalog so a bare key is enough to reconnect next time.
+// Existing profile fields are preserved.
+func SaveProviderKey(scope Scope, projectDir, name, key string) error {
+	path, err := pathFor(scope, projectDir)
+	if err != nil {
+		return err
+	}
+	cfg := &Config{}
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("parse existing config: %w", err)
+		}
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = map[string]ProviderConfig{}
+	}
+	prof := cfg.Providers[name]
+	prof.APIKey = key
+	if p, ok := catalog.Lookup(name); ok {
+		if prof.BaseURL == "" {
+			prof.BaseURL = p.BaseURL
+		}
+		if prof.Format == "" {
+			prof.Format = p.Format
+		}
+		if prof.Auth == "" {
+			prof.Auth = p.Auth
+		}
+		if prof.Model == "" {
+			prof.Model = p.DefaultModel
+		}
+	}
+	cfg.Providers[name] = prof
+	return cfg.saveTo(path)
+}
+
 func (c *Config) saveTo(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

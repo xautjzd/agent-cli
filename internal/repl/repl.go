@@ -66,7 +66,9 @@ type Repl struct {
 
 	// tuiAsk, when set (full-screen TUI active), services readInput by
 	// prompting inside the running program instead of reading stdin directly.
-	tuiAsk func(prompt string) (string, bool)
+	// tuiAskSecret is the masked variant for credentials.
+	tuiAsk       func(prompt string) (string, bool)
+	tuiAskSecret func(prompt string) (string, bool)
 	// tuiSelect, when set, presents an arrow-navigable selection overlay
 	// inside the running program (used by /resume, /config) and returns the
 	// chosen index, so lists are picked with ↑/↓ rather than a typed number.
@@ -259,6 +261,15 @@ func (r *Repl) readInput(prompt string) (string, bool) {
 		return "", false
 	}
 	return r.scanner.Text(), true
+}
+
+// readSecret reads a credential, masking the echo inside the TUI. Outside the
+// TUI it falls back to a normal read (unmasked); that path is for scripts.
+func (r *Repl) readSecret(prompt string) (string, bool) {
+	if r.tuiAskSecret != nil {
+		return r.tuiAskSecret(prompt)
+	}
+	return r.readInput(prompt)
 }
 
 // stripImagesIfNeeded removes image parts from history after switching to
@@ -828,13 +839,57 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 	}
 	p, err := cfg.BuildProvider()
 	if err != nil {
-		return err
+		// A missing credential is recoverable: prompt for the key (masked)
+		// instead of failing, then retry — and offer to save it.
+		if cfg.APIKey != "" {
+			return err
+		}
+		key, ok := r.promptProviderKey(name)
+		if !ok {
+			fmt.Fprintln(r.Out, "Provider switch cancelled.")
+			return nil
+		}
+		cfg.APIKey = key
+		if p, err = cfg.BuildProvider(); err != nil {
+			return err
+		}
+		r.offerSaveProviderKey(name, key)
 	}
 	r.Agent.SetProvider(p, cfg.Model)
 	r.Cfg = cfg
 	fmt.Fprintf(r.Out, "Switched to provider=%s model=%s (history preserved)\n", name, cfg.Model)
 	r.stripImagesIfNeeded()
 	return nil
+}
+
+// promptProviderKey asks for a provider's API key (masked), including where to
+// get one when the catalog knows.
+func (r *Repl) promptProviderKey(name string) (string, bool) {
+	prompt := fmt.Sprintf("Enter API key for %s (Enter to cancel):", name)
+	if p, ok := catalog.Lookup(name); ok && p.Notes != "" {
+		prompt = fmt.Sprintf("Enter API key for %s — get one at %s (Enter to cancel):", name, p.Notes)
+	}
+	key, ok := r.readSecret(prompt)
+	key = strings.TrimSpace(key)
+	if !ok || key == "" {
+		return "", false
+	}
+	return key, true
+}
+
+// offerSaveProviderKey asks whether to persist the just-entered key so the
+// provider reconnects without prompting next time.
+func (r *Repl) offerSaveProviderKey(name, key string) {
+	ans, ok := r.readInput(fmt.Sprintf("Save this key for %s to config? [Y/n]:", name))
+	if ok && strings.EqualFold(strings.TrimSpace(ans), "n") {
+		return
+	}
+	if err := config.SaveProviderKey(config.ScopeGlobal, "", name, key); err != nil {
+		fmt.Fprintln(r.Out, "warning: could not save key:", err)
+		return
+	}
+	path, _ := config.Path()
+	fmt.Fprintf(r.Out, "Saved key for %s to %s\n", name, path)
 }
 
 // listProviders prints the two provider sources separately and without
