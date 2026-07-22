@@ -63,6 +63,14 @@ type Repl struct {
 	// interleave permission prompts or their output.
 	gateMu sync.Mutex
 
+	// tuiAsk, when set (full-screen TUI active), services readInput by
+	// prompting inside the running program instead of reading stdin directly.
+	tuiAsk func(prompt string) (string, bool)
+	// tuiSelect, when set, presents an arrow-navigable selection overlay
+	// inside the running program (used by /resume, /config) and returns the
+	// chosen index, so lists are picked with ↑/↓ rather than a typed number.
+	tuiSelect func(title string, items []pickerItem) (int, bool)
+
 	// Policy decides approval for tool calls (rules + risk classifier); nil
 	// lazily builds a default. Audit records every gated decision as
 	// structured JSON. SandboxActive reflects whether bash is confined.
@@ -166,12 +174,8 @@ func init() {
 // (so "/commit-helper" works like in Claude Code); anything else is a user
 // prompt whose @path references are expanded before hitting the agent.
 func (r *Repl) Run(ctx context.Context) error {
-	fmt.Fprintf(r.Out, "agent-cli — provider=%s model=%s\n", r.Cfg.Provider, r.Cfg.Model)
-	fmt.Fprintln(r.Out, `Type a task, "@path" to reference files, "/" for commands and skills, "/exit" to quit.`)
-
-	// The rich line editor (live completion popup) needs a real terminal;
-	// piped stdin falls back to plain line reading so scripts and tests
-	// keep working.
+	// The full-screen TUI needs a real terminal; piped stdin falls back to the
+	// plain line loop so scripts and tests keep working.
 	r.useTUI = isTerminal(r.In)
 	r.scanner = bufio.NewScanner(r.In)
 	r.scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -180,6 +184,16 @@ func (r *Repl) Run(ctx context.Context) error {
 	r.fireLifecycle(ctx, hook.SessionStart, "")
 	defer r.fireLifecycle(ctx, hook.SessionEnd, "")
 
+	if r.useTUI {
+		return r.runTUI(ctx)
+	}
+	return r.runPlain(ctx)
+}
+
+// runPlain is the line-at-a-time loop used for non-terminal input.
+func (r *Repl) runPlain(ctx context.Context) error {
+	fmt.Fprintf(r.Out, "agent-cli — provider=%s model=%s\n", r.Cfg.Provider, r.Cfg.Model)
+	fmt.Fprintln(r.Out, `Type a task, "@path" to reference files, "/" for commands and skills, "/exit" to quit.`)
 	for {
 		fmt.Fprintln(r.Out)
 		prompt := "> "
@@ -190,32 +204,46 @@ func (r *Repl) Run(ctx context.Context) error {
 		if !ok {
 			return nil
 		}
-		input := strings.TrimSpace(line)
-		if input == "" {
-			continue
-		}
-
-		var err error
-		if strings.HasPrefix(input, "/") {
-			err = r.dispatch(ctx, input)
-		} else {
-			err = r.runPrompt(ctx, input)
-		}
-		switch {
-		case errors.Is(err, errExit):
+		if done := r.handleLine(ctx, strings.TrimSpace(line)); done {
 			return nil
-		case err != nil && ctx.Err() != nil:
-			return nil // interrupted with Ctrl-C
-		case err != nil:
-			fmt.Fprintln(r.Out, "error:", err)
 		}
 	}
 }
 
-// readInput reads one line, via the bubbletea editor on a terminal or the
-// plain scanner otherwise. ok=false means the session should end (EOF or
-// Ctrl-C at the prompt).
+// handleLine processes one submitted input line: a slash command or a prompt.
+// It returns done=true when the session should end (/exit or a Ctrl-C
+// interrupt). Output and errors go to r.Out, so both the plain loop and the
+// TUI share this logic.
+func (r *Repl) handleLine(ctx context.Context, input string) (done bool) {
+	if input == "" {
+		return false
+	}
+	var err error
+	if strings.HasPrefix(input, "/") {
+		err = r.dispatch(ctx, input)
+	} else {
+		err = r.runPrompt(ctx, input)
+	}
+	switch {
+	case errors.Is(err, errExit):
+		return true
+	case err != nil && ctx.Err() != nil:
+		return true // interrupted with Ctrl-C
+	case err != nil:
+		fmt.Fprintln(r.Out, "error:", err)
+	}
+	return false
+}
+
+// readInput reads one line. Inside the full-screen TUI it routes through the
+// running program (tuiAsk) so mid-turn prompts — permission confirmations,
+// numbered pickers, rename — appear as a modal at the bottom without a nested
+// program. On a plain terminal it uses the bubbletea line editor; otherwise
+// the scanner. ok=false means cancel/EOF.
 func (r *Repl) readInput(prompt string) (string, bool) {
+	if r.tuiAsk != nil {
+		return r.tuiAsk(prompt)
+	}
 	if r.useTUI {
 		line, ok, err := r.editLine(prompt)
 		if err != nil {
@@ -472,8 +500,21 @@ func (r *Repl) cmdResume(_ context.Context, args string) error {
 		return fmt.Errorf("no previous sessions in this project")
 	}
 
-	// Interactive picker on a terminal: ↑↓ to move, type to search, Enter
-	// to select. Numbered fallback for piped stdin.
+	// Arrow-navigable overlay inside the full-screen TUI: ↑↓ to move, type to
+	// search, Enter to select.
+	if r.tuiSelect != nil {
+		labels := sessionLabels(others, r.terminalWidth()-4)
+		items := make([]pickerItem, len(others))
+		for i, m := range others {
+			items[i] = pickerItem{label: labels[i], filterText: labels[i] + " " + m.ID}
+		}
+		idx, ok := r.tuiSelect("Resume a session:", items)
+		if !ok {
+			return nil
+		}
+		return r.resume(others[idx].ID)
+	}
+	// Legacy nested picker (only reached in the old inline TTY path).
 	if r.useTUI {
 		labels := sessionLabels(others, r.terminalWidth()-4)
 		items := make([]pickerItem, len(others))

@@ -79,8 +79,12 @@ func (r *Repl) currentValue(key string) string {
 // the chosen value is applied to the running session immediately and then
 // persisted to the selected scope — or kept session-only.
 func (r *Repl) configEdit(ctx context.Context) error {
-	// On a real terminal, the live settings panel: Space toggles, Enter
-	// edits, and it stays open so several settings can be changed in a row.
+	// Inside the full-screen TUI: an arrow-navigable settings overlay that
+	// stays open so several settings can be changed in a row.
+	if r.tuiSelect != nil {
+		return r.configEditTUI(ctx)
+	}
+	// Legacy inline TTY path: the standalone live panel program.
 	if r.useTUI {
 		return r.runConfigPanel(ctx)
 	}
@@ -133,6 +137,60 @@ func (r *Repl) configEdit(ctx context.Context) error {
 		return errExit
 	}
 	return r.applySetting(ctx, key, value, strings.ToLower(strings.TrimSpace(scope)))
+}
+
+// configEditTUI is the arrow-driven settings editor shown inside the
+// full-screen TUI: pick a setting with ↑/↓, then choose an enum value from a
+// list or type a new value; changes apply live and persist to the global
+// config. It stays open (loops) until Esc, mirroring the live panel.
+func (r *Repl) configEditTUI(ctx context.Context) error {
+	for {
+		items := make([]pickerItem, len(configSettings))
+		for i, s := range configSettings {
+			items[i] = pickerItem{
+				label:      fmt.Sprintf("%-26s %s", s.label, r.currentValue(s.key)),
+				filterText: s.label + " " + s.key,
+			}
+		}
+		idx, ok := r.tuiSelect("Settings — ↑↓ select · enter edit · esc done", items)
+		if !ok {
+			return nil
+		}
+		s := configSettings[idx]
+
+		var value string
+		if s.kind == kindEnum && len(s.choices) > 0 {
+			cur := r.currentValue(s.key)
+			choices := make([]pickerItem, len(s.choices))
+			for i, c := range s.choices {
+				label := c
+				if c == cur {
+					label += "  (current)"
+				}
+				choices[i] = pickerItem{label: label, filterText: c}
+			}
+			ci, ok := r.tuiSelect(s.label+":", choices)
+			if !ok {
+				continue
+			}
+			value = s.choices[ci]
+		} else {
+			v, ok := r.tuiAsk(fmt.Sprintf("New %s (current: %s):", s.label, r.currentValue(s.key)))
+			if !ok {
+				continue
+			}
+			value = strings.TrimSpace(v)
+			if value == "" {
+				continue
+			}
+		}
+
+		if err := r.setConfigValue(ctx, s.key, value); err != nil {
+			fmt.Fprintf(r.Out, "⚠ %s: %v\n", s.label, err)
+		} else {
+			fmt.Fprintf(r.Out, "✓ %s = %s (saved)\n", s.label, r.currentValue(s.key))
+		}
+	}
 }
 
 // applySetting applies a value to the running session and persists it

@@ -1,0 +1,686 @@
+package repl
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// Full-screen interactive UI. Unlike the per-line inline editor (which the
+// terminal reflows on resize, leaving stacked ghost frames), this is a single
+// persistent bubbletea program in the alternate screen: a scrolling
+// conversation viewport on top and a bottom-pinned input. Because it owns the
+// whole viewport, a resize triggers one clean full repaint — no artifacts, the
+// input stays pinned at the bottom, and history stays visible and scrollable.
+//
+// It reuses the existing command/turn logic: output is routed to an in-memory
+// scrollback that the viewport renders, and mid-turn prompts (permission
+// confirmations, numbered pickers) are serviced by the running program via
+// r.tuiAsk, so no nested program is ever needed.
+
+// scrollback is the thread-safe text buffer the viewport renders. Both the
+// command output (r.Out) and the agent event sink write to it; every write
+// notifies the program so the viewport refreshes live (streaming output).
+type scrollback struct {
+	mu     sync.Mutex
+	buf    strings.Builder
+	notify func()
+}
+
+func (s *scrollback) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	s.buf.Write(p)
+	s.mu.Unlock()
+	if s.notify != nil {
+		s.notify()
+	}
+	return len(p), nil
+}
+
+func (s *scrollback) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// --- messages ---------------------------------------------------------------
+
+type refreshMsg struct{}             // scrollback changed; re-render the viewport
+type turnDoneMsg struct{ done bool } // a turn finished (done => quit)
+type askMsg struct {                 // a mid-turn text prompt needs answering
+	prompt string
+	reply  chan tuiReply
+}
+type tuiReply struct {
+	text string
+	ok   bool
+}
+
+// selectMsg opens an arrow-navigable selection overlay and delivers the chosen
+// index back on reply. It powers /resume, /config, and any other list picker,
+// so selection is by ↑/↓ (with type-to-search) rather than typing a number.
+type selectMsg struct {
+	title string
+	items []pickerItem
+	reply chan pickReply
+}
+type pickReply struct {
+	idx int
+	ok  bool
+}
+
+// pickState is the live state of an open selection overlay.
+type pickState struct {
+	title    string
+	items    []pickerItem
+	filtered []int // indexes into items matching the search
+	search   string
+	sel      int // index into filtered
+	offset   int // first visible row
+	reply    chan pickReply
+}
+
+// pickRows is the visible height of a selection overlay's list.
+const pickRows = 10
+
+// tuiModel is the bubbletea model for the full-screen UI.
+type tuiModel struct {
+	repl    *Repl
+	ctx     context.Context
+	program *tea.Program
+	sb      *scrollback
+
+	vp    viewport.Model
+	input textinput.Model
+	ready bool // first WindowSizeMsg received
+	w, h  int
+
+	busy       bool               // a turn is running
+	turnCancel context.CancelFunc // cancels the running turn (Ctrl-C)
+
+	// completion popup state (reuses the inline editor's logic)
+	cands  []candidate
+	sel    int
+	offset int
+
+	// ask is set while a mid-turn text prompt (permission) is awaiting the
+	// user's answer; pick is set while an arrow-navigable selection overlay
+	// (/resume, /config) is open. At most one is active at a time.
+	ask  *askMsg
+	pick *pickState
+
+	quitting bool
+}
+
+// tui styles.
+var (
+	styleWorking = lipgloss.NewStyle().Faint(true)                                // "working…" placeholder
+	styleAsk     = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true) // overlay title
+)
+
+// runTUI runs the full-screen interactive session. It swaps r.Out and the
+// agent's event sink onto an in-memory scrollback for the duration, restoring
+// them on exit.
+func (r *Repl) runTUI(ctx context.Context) error {
+	realOut := r.Out
+	sb := &scrollback{}
+
+	ti := textinput.New()
+	ti.Prompt = "> "
+	ti.Focus()
+
+	m := &tuiModel{
+		repl:  r,
+		ctx:   ctx,
+		sb:    sb,
+		input: ti,
+	}
+
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(),
+		tea.WithInput(r.In), tea.WithOutput(realOut))
+	m.program = p
+
+	// Seed the banner while notify is still nil, so it does not try to Send to
+	// the program before its event loop is running (which would deadlock).
+	fmt.Fprintf(sb, "\033[2magent-cli — provider=%s model=%s\033[0m\n", r.Cfg.Provider, r.Cfg.Model)
+	fmt.Fprintln(sb, "\033[2mType a task · \"@path\" to reference files · \"/\" for commands · /exit to quit\033[0m")
+
+	// Refresh on every scrollback write. Send from a goroutine so a write from
+	// within Update (or before Run starts) never blocks the caller.
+	sb.notify = func() { go p.Send(refreshMsg{}) }
+
+	// Route all conversation output through the scrollback while the TUI runs.
+	r.Out = sb
+	oldEvents := r.Agent.Events
+	r.Agent.Events = newTUIEvents(sb)
+	r.tuiAsk = m.requestInput
+	r.tuiSelect = m.requestSelect
+	r.useTUI = false // in-model overlays replace the old nested-program pickers
+	defer func() {
+		r.Out = realOut
+		r.Agent.Events = oldEvents
+		r.tuiAsk = nil
+		r.tuiSelect = nil
+	}()
+
+	_, err := p.Run()
+	return err
+}
+
+// requestInput services readInput from within the running program: it posts an
+// ask prompt and blocks the calling (turn) goroutine until the user answers.
+func (m *tuiModel) requestInput(prompt string) (string, bool) {
+	reply := make(chan tuiReply, 1)
+	m.program.Send(askMsg{prompt: prompt, reply: reply})
+	r := <-reply
+	return r.text, r.ok
+}
+
+// requestSelect opens an arrow-navigable selection overlay and blocks the
+// calling (turn) goroutine until the user picks an item or cancels.
+func (m *tuiModel) requestSelect(title string, items []pickerItem) (int, bool) {
+	reply := make(chan pickReply, 1)
+	m.program.Send(selectMsg{title: title, items: items, reply: reply})
+	rp := <-reply
+	return rp.idx, rp.ok
+}
+
+func (m *tuiModel) Init() tea.Cmd { return textinput.Blink }
+
+func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.w, m.h = msg.Width, msg.Height
+		m.layout()
+		m.refreshViewport()
+		m.ready = true
+		return m, nil
+
+	case refreshMsg:
+		m.refreshViewport()
+		return m, nil
+
+	case askMsg:
+		// A mid-turn prompt: focus a fresh answer field at the bottom.
+		m.ask = &msg
+		m.input.SetValue("")
+		m.input.Prompt = "  " + strings.TrimSpace(msg.prompt) + " "
+		m.input.Focus()
+		m.cands = nil
+		return m, nil
+
+	case selectMsg:
+		// A selection overlay: arrow keys navigate, typing filters.
+		m.pick = &pickState{title: msg.title, items: msg.items, reply: msg.reply}
+		m.pickRefilter()
+		return m, nil
+
+	case turnDoneMsg:
+		m.busy = false
+		m.turnCancel = nil
+		m.input.Prompt = m.basePrompt()
+		m.input.Focus()
+		if msg.done {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		m.refreshViewport()
+		return m, nil
+
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	}
+
+	// Forward other messages (mouse, etc.) to the viewport for scrolling.
+	var cmd tea.Cmd
+	m.vp, cmd = m.vp.Update(msg)
+	return m, cmd
+}
+
+// handleKey routes a keypress by mode: answering a prompt, running a turn, or
+// idle editing.
+func (m *tuiModel) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// A selection overlay captures all keys (including its own arrow nav).
+	if m.pick != nil {
+		return m.handlePickKey(key)
+	}
+
+	// Scrolling works in every other mode.
+	switch key.Type {
+	case tea.KeyPgUp, tea.KeyPgDown, tea.KeyCtrlU, tea.KeyCtrlD:
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(key)
+		return m, cmd
+	}
+
+	if m.ask != nil {
+		return m.handleAskKey(key)
+	}
+	if m.busy {
+		// While a turn runs, only interruption is accepted.
+		if key.Type == tea.KeyCtrlC {
+			if m.turnCancel != nil {
+				m.turnCancel()
+			}
+			fmt.Fprintln(m.sb, "\033[2m⏹ interrupting…\033[0m")
+		}
+		return m, nil
+	}
+	return m.handleIdleKey(key)
+}
+
+// handlePickKey drives the selection overlay: ↑/↓ move, Enter chooses, Esc or
+// Ctrl-C cancels, and any printable key filters the list by search text.
+func (m *tuiModel) handlePickKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	p := m.pick
+	switch key.Type {
+	case tea.KeyUp, tea.KeyCtrlP:
+		if len(p.filtered) > 0 {
+			p.sel = (p.sel - 1 + len(p.filtered)) % len(p.filtered)
+			m.pickScroll()
+		}
+		return m, nil
+	case tea.KeyDown, tea.KeyCtrlN:
+		if len(p.filtered) > 0 {
+			p.sel = (p.sel + 1) % len(p.filtered)
+			m.pickScroll()
+		}
+		return m, nil
+	case tea.KeyEnter:
+		idx, ok := -1, false
+		if p.sel >= 0 && p.sel < len(p.filtered) {
+			idx, ok = p.filtered[p.sel], true
+		}
+		p.reply <- pickReply{idx: idx, ok: ok}
+		m.pick = nil
+		return m, nil
+	case tea.KeyEsc, tea.KeyCtrlC:
+		p.reply <- pickReply{idx: -1, ok: false}
+		m.pick = nil
+		return m, nil
+	case tea.KeyBackspace:
+		if p.search != "" {
+			p.search = p.search[:len(p.search)-1]
+			m.pickRefilter()
+		}
+		return m, nil
+	case tea.KeyRunes, tea.KeySpace:
+		p.search += string(key.Runes)
+		if key.Type == tea.KeySpace {
+			p.search += " "
+		}
+		m.pickRefilter()
+		return m, nil
+	}
+	return m, nil
+}
+
+// pickRefilter recomputes the visible items from the search text.
+func (m *tuiModel) pickRefilter() {
+	p := m.pick
+	q := strings.ToLower(strings.TrimSpace(p.search))
+	p.filtered = p.filtered[:0]
+	for i, it := range p.items {
+		if q == "" || strings.Contains(strings.ToLower(it.filterText), q) {
+			p.filtered = append(p.filtered, i)
+		}
+	}
+	if p.sel >= len(p.filtered) {
+		p.sel = 0
+	}
+	m.pickScroll()
+}
+
+func (m *tuiModel) pickScroll() {
+	p := m.pick
+	if p.sel < p.offset {
+		p.offset = p.sel
+	}
+	if p.sel >= p.offset+pickRows {
+		p.offset = p.sel - pickRows + 1
+	}
+}
+
+// pickView renders the selection overlay shown in place of the input box.
+func (m *tuiModel) pickView() string {
+	p := m.pick
+	var b strings.Builder
+	title := p.title
+	if p.search != "" {
+		title += "  (filter: " + p.search + ")"
+	}
+	b.WriteString(styleAsk.Render(title) + "\n")
+
+	end := p.offset + pickRows
+	if end > len(p.filtered) {
+		end = len(p.filtered)
+	}
+	if p.offset > 0 {
+		b.WriteString(styleHint.Render(fmt.Sprintf("  ↑ %d more", p.offset)) + "\n")
+	}
+	for i := p.offset; i < end; i++ {
+		it := p.items[p.filtered[i]]
+		line := "  " + it.label
+		if i == p.sel {
+			line = styleSelected.Render("❯ " + it.label)
+		}
+		b.WriteString(line)
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
+	if len(p.filtered) == 0 {
+		b.WriteString(styleHint.Render("  (no matches)"))
+	}
+	if end < len(p.filtered) {
+		b.WriteString("\n" + styleHint.Render(fmt.Sprintf("  ↓ %d more", len(p.filtered)-end)))
+	}
+	b.WriteString("\n" + styleHint.Render("  ↑↓ select · enter choose · type to filter · esc cancel"))
+	return b.String()
+}
+
+// handleAskKey answers a pending mid-turn prompt.
+func (m *tuiModel) handleAskKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyEnter:
+		val := m.input.Value()
+		m.ask.reply <- tuiReply{text: val, ok: true}
+		m.ask = nil
+		m.input.SetValue("")
+		m.input.Prompt = m.workingPrompt()
+		return m, nil
+	case tea.KeyCtrlC:
+		m.ask.reply <- tuiReply{ok: false}
+		m.ask = nil
+		m.input.SetValue("")
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(key)
+	return m, cmd
+}
+
+// handleIdleKey edits the input line and completion popup, and submits.
+func (m *tuiModel) handleIdleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyCtrlC, tea.KeyCtrlD:
+		m.quitting = true
+		return m, tea.Quit
+
+	case tea.KeyCtrlV:
+		m.pasteImage()
+		return m, nil
+
+	case tea.KeyEnter:
+		if c, ok := m.selectedCand(); ok && m.wouldChange(c) {
+			m.acceptCand(c)
+			return m, nil
+		}
+		return m.submit()
+
+	case tea.KeyTab:
+		if c, ok := m.selectedCand(); ok {
+			m.acceptCand(c)
+		}
+		return m, nil
+
+	case tea.KeyEsc:
+		m.cands = nil
+		return m, nil
+
+	// ↑/↓ and the Emacs Ctrl-P/Ctrl-N move through the completion menu (when
+	// open) or input history (when not).
+	case tea.KeyUp, tea.KeyCtrlP:
+		m.idleUp()
+		return m, nil
+
+	case tea.KeyDown, tea.KeyCtrlN:
+		m.idleDown()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(key)
+	m.refreshCands()
+	return m, cmd
+}
+
+// idleUp/idleDown move through the completion menu when it is open, otherwise
+// through input history.
+func (m *tuiModel) idleUp() {
+	if len(m.cands) > 0 {
+		m.sel = (m.sel - 1 + len(m.cands)) % len(m.cands)
+		m.scrollCands()
+		return
+	}
+	m.input.SetValue(m.repl.historyPrev(m.input.Value()))
+	m.input.CursorEnd()
+}
+
+func (m *tuiModel) idleDown() {
+	if len(m.cands) > 0 {
+		m.sel = (m.sel + 1) % len(m.cands)
+		m.scrollCands()
+		return
+	}
+	m.input.SetValue(m.repl.historyNext())
+	m.input.CursorEnd()
+}
+
+// submit runs the current input line as a turn.
+func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
+	line := strings.TrimSpace(m.input.Value())
+	if line == "" {
+		return m, nil
+	}
+	m.repl.historyAdd(line)
+	// Echo the submitted line into the scrollback with the ❯ marker.
+	label := line
+	if p := m.basePrompt(); p != "> " {
+		label = p + line
+	}
+	fmt.Fprintf(m.sb, "\n%s %s\n", styleMarker.Render("❯"), label)
+
+	m.input.SetValue("")
+	m.cands = nil
+	m.busy = true
+	m.input.Prompt = m.workingPrompt()
+
+	tctx, cancel := context.WithCancel(m.ctx)
+	m.turnCancel = cancel
+	return m, func() tea.Msg {
+		done := m.repl.handleLine(tctx, line)
+		return turnDoneMsg{done: done}
+	}
+}
+
+// --- completion (reuses the inline editor's helpers) ------------------------
+
+func (m *tuiModel) refreshCands() {
+	prevFirst := ""
+	if len(m.cands) > 0 {
+		prevFirst = m.cands[0].text
+	}
+	m.cands = m.repl.completionsFor(m.input.Value(), m.input.Position())
+	if len(m.cands) == 0 {
+		m.sel = -1
+		m.offset = 0
+		return
+	}
+	if m.sel < 0 || m.sel >= len(m.cands) || prevFirst != m.cands[0].text {
+		m.sel = 0
+		m.offset = 0
+	}
+	m.scrollCands()
+}
+
+func (m *tuiModel) scrollCands() {
+	if m.sel < m.offset {
+		m.offset = m.sel
+	}
+	if m.sel >= m.offset+popupRows {
+		m.offset = m.sel - popupRows + 1
+	}
+}
+
+func (m *tuiModel) selectedCand() (candidate, bool) {
+	if m.sel >= 0 && m.sel < len(m.cands) {
+		return m.cands[m.sel], true
+	}
+	return candidate{}, false
+}
+
+func (m *tuiModel) wouldChange(c candidate) bool {
+	start, end := tokenBounds(m.input.Value(), m.input.Position())
+	return m.input.Value()[start:end] != c.text
+}
+
+func (m *tuiModel) acceptCand(c candidate) {
+	value, pos := acceptCandidate(m.input.Value(), m.input.Position(), c)
+	m.input.SetValue(value)
+	m.input.SetCursor(pos)
+	m.refreshCands()
+}
+
+// pasteImage mirrors the inline editor's Ctrl+V behavior.
+func (m *tuiModel) pasteImage() {
+	data, err := readClipboardImage()
+	if err != nil {
+		return
+	}
+	path, err := savePastedImage(data)
+	if err != nil {
+		return
+	}
+	n := m.repl.addPastedImage(path)
+	token := fmt.Sprintf("[Image #%d] ", n)
+	v, pos := m.input.Value(), m.input.Position()
+	m.input.SetValue(v[:pos] + token + v[pos:])
+	m.input.SetCursor(pos + len(token))
+}
+
+// --- layout & rendering -----------------------------------------------------
+
+func (m *tuiModel) basePrompt() string {
+	if m.repl.planMode {
+		return "plan> "
+	}
+	return "> "
+}
+
+func (m *tuiModel) workingPrompt() string { return "> " }
+
+// layout sizes the viewport to fill everything above the footer.
+func (m *tuiModel) layout() {
+	footer := lipgloss.Height(m.footer())
+	vpH := m.h - footer
+	if vpH < 1 {
+		vpH = 1
+	}
+	if !m.ready {
+		m.vp = viewport.New(m.w, vpH)
+	} else {
+		m.vp.Width = m.w
+		m.vp.Height = vpH
+	}
+}
+
+// refreshViewport re-wraps the scrollback to the current width and shows it,
+// keeping the view pinned to the newest output.
+func (m *tuiModel) refreshViewport() {
+	if !m.ready {
+		return
+	}
+	m.layout() // footer height can change (popup shown/hidden)
+	wrap := lipgloss.NewStyle().Width(m.vp.Width)
+	m.vp.SetContent(wrap.Render(strings.TrimRight(m.sb.String(), "\n")))
+	m.vp.GotoBottom()
+}
+
+// footer renders the bottom region: completion popup (if any) above the input
+// box, or the working indicator while a turn runs.
+func (m *tuiModel) footer() string {
+	width := m.boxWidth()
+
+	// A selection overlay takes over the whole footer.
+	if m.pick != nil {
+		return m.pickView()
+	}
+
+	var b strings.Builder
+	// Completion popup (idle only).
+	if m.ask == nil && !m.busy && len(m.cands) > 0 {
+		b.WriteString(m.popupView() + "\n")
+	}
+
+	box := styleInputBox.Width(width).MaxHeight(3)
+	switch {
+	case m.ask != nil:
+		b.WriteString(box.Render(m.input.View()))
+	case m.busy:
+		b.WriteString(box.Render(styleWorking.Render("working… (Ctrl-C to interrupt)")))
+	default:
+		b.WriteString(box.Render(m.input.View()))
+		b.WriteString("\n" + styleHint.Render("  ↑↓ history/menu · tab accept · pgup/pgdn scroll · /exit"))
+	}
+	return b.String()
+}
+
+func (m *tuiModel) popupView() string {
+	var b strings.Builder
+	end := m.offset + popupRows
+	if end > len(m.cands) {
+		end = len(m.cands)
+	}
+	if m.offset > 0 {
+		b.WriteString(styleHint.Render(fmt.Sprintf("  ↑ %d more", m.offset)) + "\n")
+	}
+	for i := m.offset; i < end; i++ {
+		c := m.cands[i]
+		padded := " " + truncPad(c.text, 28)
+		line := padded + " " + styleDesc.Render(c.desc)
+		if i == m.sel {
+			line = styleSelected.Render(padded) + " " + styleDesc.Render(c.desc)
+		}
+		b.WriteString(line)
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
+	if end < len(m.cands) {
+		b.WriteString("\n" + styleHint.Render(fmt.Sprintf("  ↓ %d more", len(m.cands)-end)))
+	}
+	return b.String()
+}
+
+func (m *tuiModel) boxWidth() int {
+	w := m.w - 2
+	if w < 12 {
+		w = 12
+	}
+	return w
+}
+
+func (m *tuiModel) View() string {
+	if m.quitting {
+		return ""
+	}
+	if !m.ready {
+		return "starting…"
+	}
+	return m.vp.View() + "\n" + m.footer()
+}
+
+// truncPad truncates or right-pads s to n display columns.
+func truncPad(s string, n int) string {
+	if lipgloss.Width(s) > n {
+		return lipgloss.NewStyle().MaxWidth(n).Render(s)
+	}
+	return s + strings.Repeat(" ", n-lipgloss.Width(s))
+}

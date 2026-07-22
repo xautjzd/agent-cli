@@ -102,14 +102,14 @@ func (m *configModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlC, tea.KeyEsc:
 		m.abort = true
 		return m, tea.Quit
-	case tea.KeyUp:
+	case tea.KeyUp, tea.KeyCtrlP:
 		if len(m.visible) > 0 {
 			m.sel = (m.sel - 1 + len(m.visible)) % len(m.visible)
 			m.scroll()
 		}
 		m.status = ""
 		return m, nil
-	case tea.KeyDown:
+	case tea.KeyDown, tea.KeyCtrlN:
 		if len(m.visible) > 0 {
 			m.sel = (m.sel + 1) % len(m.visible)
 			m.scroll()

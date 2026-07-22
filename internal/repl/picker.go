@@ -60,12 +60,12 @@ func (m *pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		return m, nil
-	case tea.KeyUp:
+	case tea.KeyUp, tea.KeyCtrlP:
 		if len(m.visible) > 0 {
 			m.sel = (m.sel - 1 + len(m.visible)) % len(m.visible)
 		}
 		return m, nil
-	case tea.KeyDown:
+	case tea.KeyDown, tea.KeyCtrlN:
 		if len(m.visible) > 0 {
 			m.sel = (m.sel + 1) % len(m.visible)
 		}

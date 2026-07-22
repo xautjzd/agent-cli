@@ -54,23 +54,36 @@ agent -p "explain the structure of this repository"
 ## Interactive session
 
 Inside `agent` (the REPL), the same conventions as Claude Code / Codex / pi apply.
-On a real terminal the input line is a rich editor (built on bubbletea): the pending
-input renders inside a **rounded frame** that clearly separates it from the output
-above, and typing `/` at the start of the line or `@` anywhere pops up a
-**live-filtered candidate menu** as you type. On submit the frame collapses to a
-compact `❯ input` line so scrollback stays dense (transcript replay uses the same
-form).
+On a real terminal the session is a **full-screen UI** (a single persistent bubbletea
+program in the alternate screen): a scrolling **conversation viewport** on top and a
+**bottom-pinned input box**. Typing `/` at the start of the line or `@` anywhere pops up
+a **live-filtered candidate menu** as you type.
 
 ```
-╭──────────────────────────────────────────────╮
-│ > refactor the config loader                 │
-╰──────────────────────────────────────────────╯
+ … conversation scrolls here (PgUp/PgDn to scroll back) …
+ ❯ refactor the config loader
+ ● EditFile(internal/config/config.go)
+   ⎿ Edited internal/config/config.go (+8 -2)
+
+╭──────────────────────────────────────────────────────────────╮
+│ >                                                            │
+╰──────────────────────────────────────────────────────────────╯
+  ↑↓ history/menu · tab accept · pgup/pgdn scroll · /exit
 ```
 
-Keys: `↑`/`↓` navigate candidates (or input history when no popup is open),
-`Tab` or `Enter` accept the highlighted candidate, `Esc` dismisses, `Ctrl-C` exits.
-When stdin is piped (scripts, CI), the REPL automatically falls back to plain
-line-by-line reading.
+Because the program owns the whole viewport, **resizing the terminal repaints cleanly** —
+the input stays pinned at the bottom, history stays visible, and there are no stacked
+"ghost box" artifacts (the failure mode of an inline editor the terminal reflows). Mid-turn
+interactions are handled as overlays in the same program (no nested program is spawned): a
+permission confirmation is a modal prompt, and list pickers (`/resume`, `/config`) are
+**arrow-navigable** — `↑`/`↓` to move, type to filter, `Enter` to choose, `Esc` to cancel.
+`/config` stays open so you can change several settings in a row; enum settings (permission
+mode, sandbox, …) present their choices as a sub-list.
+
+Keys: `↑`/`↓` navigate candidates (or input history when no popup is open), `Tab` accepts
+the highlighted candidate, `Enter` submits, `PgUp`/`PgDn` scroll the conversation, `Ctrl-C`
+interrupts a running turn (or exits when idle). When stdin is piped (scripts, CI), the REPL
+falls back to plain line-by-line reading.
 
 ### `@path` file references
 
@@ -900,8 +913,9 @@ internal/session/     Session persistence for /resume (one JSON file per session
 internal/diff/        Line-oriented unified diff engine (pure; used by file tools)
 internal/home/        Resolves the agent home directory (~/.agent or ~/.agents)
 internal/agent/       Agentic loop (agent.go) + system prompt assembly (prompt.go)
-internal/repl/        Interactive session: bubbletea line editor with live completion
-                      (editor.go, complete.go), slash commands, @path expansion
+internal/repl/        Interactive session: full-screen TUI (tui.go — viewport +
+                      bottom-pinned input, clean resize), live completion
+                      (complete.go), slash commands, @path expansion
 ```
 
 Design notes (SOLID):

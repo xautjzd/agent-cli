@@ -155,7 +155,7 @@ func (m *editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cands = nil
 		return m, nil
 
-	case tea.KeyUp:
+	case tea.KeyUp, tea.KeyCtrlP:
 		if len(m.cands) > 0 {
 			m.sel = (m.sel - 1 + len(m.cands)) % len(m.cands)
 			m.scrollToSelection()
@@ -165,7 +165,7 @@ func (m *editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyDown:
+	case tea.KeyDown, tea.KeyCtrlN:
 		if len(m.cands) > 0 {
 			m.sel = (m.sel + 1) % len(m.cands)
 			m.scrollToSelection()
