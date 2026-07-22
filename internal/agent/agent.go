@@ -80,6 +80,26 @@ type Gate interface {
 	BeforeToolCall(name string, args string) (allow bool, note string)
 }
 
+// ToolHooks lets an integration layer observe and influence tool execution
+// (the PreToolUse/PostToolUse extension points). The agent depends only on
+// this interface (DIP); the hook runner implements it. Nil disables hooks.
+type ToolHooks interface {
+	// PreToolUse runs before a tool executes. Block stops the call (its
+	// Reason is fed back to the model); Context, if any, is appended to the
+	// eventual result.
+	PreToolUse(ctx context.Context, name, args string) HookOutcome
+	// PostToolUse runs after a tool executes. Context, if any, is appended to
+	// the result the model sees.
+	PostToolUse(ctx context.Context, name, args, result string, ok bool) HookOutcome
+}
+
+// HookOutcome is the agent-facing result of a tool hook.
+type HookOutcome struct {
+	Block   bool
+	Reason  string
+	Context string
+}
+
 // Agent owns one conversation with the model.
 type Agent struct {
 	Provider provider.Provider
@@ -88,6 +108,9 @@ type Agent struct {
 	Events   Events
 	// Gate, when non-nil, screens every tool call (permission modes).
 	Gate Gate
+	// Hooks, when non-nil, runs PreToolUse/PostToolUse integration hooks
+	// around each tool call.
+	Hooks ToolHooks
 	// MaxTurns bounds tool-use iterations per user message to prevent
 	// runaway loops.
 	MaxTurns int
@@ -256,11 +279,7 @@ func (a *Agent) executeToolCalls(ctx context.Context, calls []provider.ToolCall)
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			content, ok := a.Tools.Execute(ctx, calls[i].Function.Name, json.RawMessage(calls[i].Function.Arguments))
-			if notes[i] != "" {
-				content = notes[i] + "\n\n" + content
-			}
-			outcomes[i] = toolOutcome{content: content, ok: ok}
+			outcomes[i] = a.executeWithHooks(ctx, calls[i], notes[i])
 		}(i)
 	}
 	wg.Wait()
@@ -292,18 +311,44 @@ func (a *Agent) runOneToolCall(ctx context.Context, call provider.ToolCall) tool
 	if !allow {
 		out = toolOutcome{content: deniedResult, ok: false}
 	} else {
-		content, ok := a.Tools.Execute(ctx, call.Function.Name, json.RawMessage(call.Function.Arguments))
-		if note != "" {
-			// Audit note becomes part of the context (and thus the persisted
-			// session) for traceability.
-			content = note + "\n\n" + content
-		}
-		out = toolOutcome{content: content, ok: ok}
+		out = a.executeWithHooks(ctx, call, note)
 	}
 	if a.Events != nil {
 		a.Events.OnToolResult(call.Function.Name, out.content, out.ok)
 	}
 	return out
+}
+
+// executeWithHooks runs the PreToolUse hook, the tool itself, and the
+// PostToolUse hook for a gate-approved call, weaving any hook-supplied context
+// into the result the model sees. A blocking PreToolUse hook prevents
+// execution and reports the reason instead.
+func (a *Agent) executeWithHooks(ctx context.Context, call provider.ToolCall, note string) toolOutcome {
+	name, args := call.Function.Name, call.Function.Arguments
+
+	if a.Hooks != nil {
+		if h := a.Hooks.PreToolUse(ctx, name, args); h.Block {
+			reason := h.Reason
+			if reason == "" {
+				reason = "blocked by a PreToolUse hook"
+			}
+			return toolOutcome{content: "Error: " + reason, ok: false}
+		}
+	}
+
+	content, ok := a.Tools.Execute(ctx, name, json.RawMessage(args))
+	if note != "" {
+		// Audit note becomes part of the context (and thus the persisted
+		// session) for traceability.
+		content = note + "\n\n" + content
+	}
+
+	if a.Hooks != nil {
+		if h := a.Hooks.PostToolUse(ctx, name, args, content, ok); h.Context != "" {
+			content += "\n\n" + h.Context
+		}
+	}
+	return toolOutcome{content: content, ok: ok}
 }
 
 // appendToolResult records a tool result message. Every tool call must be

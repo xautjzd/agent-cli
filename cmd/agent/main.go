@@ -26,6 +26,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/agent"
 	"github.com/xautjzd/agent-cli/internal/config"
+	"github.com/xautjzd/agent-cli/internal/hook"
 	"github.com/xautjzd/agent-cli/internal/mcp"
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/permission"
@@ -220,11 +221,15 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 		Policy:        buildPolicy(cfg, workDir),
 		Audit:         permission.NewAuditLogger(session.AuditLogPath(workDir)),
 		SandboxActive: sbox.Available(),
+		Hooks:         buildHooks(cfg),
 		Sessions:      session.NewProjectStore(workDir),
 		WorkDir:       workDir,
 		In:            os.Stdin,
 		Out:           os.Stdout,
 	}
+	// The REPL adapts the hook runner to the agent's PreToolUse/PostToolUse
+	// extension points.
+	ag.Hooks = r
 	if sbox.Available() {
 		fmt.Fprintf(os.Stdout, "\033[2m● sandbox: %s\033[0m\n", sbox.Reason())
 	}
@@ -239,6 +244,27 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	}
 	r.GoalMaxRounds = cfg.GoalMaxRounds
 	return r, nil
+}
+
+// buildHooks assembles the lifecycle hook runner from config. Invalid hooks
+// are reported to stderr but do not abort startup.
+func buildHooks(cfg *config.Config) *hook.Runner {
+	var hooks []hook.Hook
+	for event, hcs := range cfg.Hooks {
+		for _, hc := range hcs {
+			hooks = append(hooks, hook.Hook{
+				Event:   hook.Event(event),
+				Matcher: hc.Matcher,
+				Command: hc.Command,
+				Timeout: time.Duration(hc.TimeoutSeconds) * time.Second,
+			})
+		}
+	}
+	runner, errs := hook.New(hooks)
+	for _, err := range errs {
+		fmt.Fprintf(os.Stderr, "warning: invalid hook: %v\n", err)
+	}
+	return runner
 }
 
 // buildPolicy assembles the permission policy from config: the bash posture

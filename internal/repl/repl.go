@@ -19,6 +19,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/agent"
 	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/config"
+	"github.com/xautjzd/agent-cli/internal/hook"
 	"github.com/xautjzd/agent-cli/internal/mcp"
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/permission"
@@ -68,6 +69,10 @@ type Repl struct {
 	Policy        *permission.Policy
 	Audit         *permission.AuditLogger
 	SandboxActive bool
+
+	// Hooks runs third-party integration commands at lifecycle events; nil
+	// is a no-op (the runner tolerates a nil receiver).
+	Hooks *hook.Runner
 
 	// VisionClient overrides the lazily built vision-fallback provider
 	// (primarily a test seam).
@@ -137,6 +142,7 @@ func init() {
 		{"tools", "/tools", "List available tools", (*Repl).cmdTools},
 		{"mcp", "/mcp", "List connected MCP servers and their tools", (*Repl).cmdMCP},
 		{"agents", "/agents", "List subagent types the task tool can delegate to", (*Repl).cmdAgents},
+		{"hooks", "/hooks", "List configured lifecycle hooks (third-party integration)", (*Repl).cmdHooks},
 		{"config", "/config [set k v]", "Open the settings panel (view + edit); or set one value", (*Repl).cmdConfig},
 		{"memory", "/memory", "List saved project memories", (*Repl).cmdMemory},
 		{"goal", "/goal [text|clear]", "Set a session goal the agent works toward until met", (*Repl).cmdGoal},
@@ -169,6 +175,10 @@ func (r *Repl) Run(ctx context.Context) error {
 	r.useTUI = isTerminal(r.In)
 	r.scanner = bufio.NewScanner(r.In)
 	r.scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	// SessionStart hooks fire once the loop is ready; SessionEnd on exit.
+	r.fireLifecycle(ctx, hook.SessionStart, "")
+	defer r.fireLifecycle(ctx, hook.SessionEnd, "")
 
 	for {
 		fmt.Fprintln(r.Out)
@@ -259,7 +269,12 @@ func (r *Repl) runPrompt(ctx context.Context, input string) error {
 	if r.planMode {
 		return r.runPlanTurn(ctx, input)
 	}
-	msg, err := buildUserMessage(input, r.WorkDir, r.imagePastes, nil)
+	// UserPromptSubmit hooks may block the turn or inject extra context.
+	augmented, blocked := r.onUserPromptSubmit(ctx, input)
+	if blocked {
+		return nil
+	}
+	msg, err := buildUserMessage(augmented, r.WorkDir, r.imagePastes, nil)
 	if err != nil {
 		return err
 	}
@@ -267,10 +282,14 @@ func (r *Repl) runPrompt(ctx context.Context, input string) error {
 		return err
 	}
 	_, err = r.Agent.RunMessage(ctx, msg)
+	// The raw input (not the hook-augmented form) is what the user typed, so
+	// that is what the session records for replay.
 	r.saveSession(input)
 	if err != nil {
 		return err
 	}
+	// Stop hooks fire when the agent finishes responding to the turn.
+	r.fireLifecycle(ctx, hook.Stop, "")
 	// An active /goal keeps the agent working after every turn.
 	return r.checkGoal(ctx)
 }

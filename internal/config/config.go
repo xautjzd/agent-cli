@@ -104,6 +104,18 @@ type Config struct {
 	// to, keyed by type name. The built-in general-purpose type is always
 	// available.
 	Subagents map[string]SubagentConfig `json:"subagents,omitempty"`
+	// Hooks declares external commands to run at lifecycle events (see the
+	// hook package), keyed by event name. It integrates the agent with
+	// third-party systems (linters, notifiers, policy engines).
+	Hooks map[string][]HookConfig `json:"hooks,omitempty"`
+}
+
+// HookConfig is one configured hook command for an event. Matcher, when set,
+// is a regular expression on the tool name for PreToolUse/PostToolUse events.
+type HookConfig struct {
+	Matcher        string `json:"matcher,omitempty"`
+	Command        string `json:"command"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 }
 
 // PermissionRule is one user-defined approval rule (see the permission
@@ -344,6 +356,14 @@ func mergeFile(cfg *Config, path string) error {
 			cfg.Subagents = map[string]SubagentConfig{}
 		}
 		cfg.Subagents[name] = s
+	}
+	// Hooks accumulate across layers per event, so a project can add hooks on
+	// top of the global ones.
+	for event, hooks := range layer.Hooks {
+		if cfg.Hooks == nil {
+			cfg.Hooks = map[string][]HookConfig{}
+		}
+		cfg.Hooks[event] = append(cfg.Hooks[event], hooks...)
 	}
 	return nil
 }
