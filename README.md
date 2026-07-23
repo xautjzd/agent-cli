@@ -10,7 +10,7 @@ memory.
 
 - **Agentic loop** — the model plans, calls tools, reads results, and iterates until done.
 - **Built-in tools** — `bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`,
-  `list_dir`, `use_skill`, `remember`, `forget`.
+  `list_dir`, `use_skill`, `remember`, `forget`, `web_search`, `web_fetch`, `todo_write`.
 - **Skills** — install and invoke SKILL.md-based skills; shares the standard
   `~/.agent/skills` directory so skills are reusable across agent tools; project-local
   `.agent/skills` can shadow global skills.
@@ -163,6 +163,7 @@ picker instead. Commands:
 | `/<skill-name> [task]` | Run any installed skill as a slash command, optionally with a task |
 | `/skills` | List installed skills (aligned; `agent skill show <name>` for full text) |
 | `/tools` | List available tools (aligned two-column layout) |
+| `/todos` | Show the agent's current task list (from `todo_write`) |
 | `/mcp` | List connected MCP servers, their transport, and the tools each contributed |
 | `/agents` | List subagent types the `task` tool can delegate to |
 | `/hooks` | List configured lifecycle hooks (third-party integration) |
@@ -833,6 +834,38 @@ share the agent's knowledge with your team.
 | `task` | Delegate an independent sub-task to a subagent (see below) |
 | `web_search` | Search the web for current docs, APIs, versions, error explanations |
 | `web_fetch` | Fetch a URL as Markdown; optional `prompt` returns only the relevant part |
+| `todo_write` | Maintain a structured todo list to plan and track a multi-step task (see below) |
+
+### Task planning & progress tracking
+
+For any multi-step or non-trivial task, the agent maintains a structured **todo
+list** via the `todo_write` tool — the planning pattern popularized by Claude Code,
+pi, and opencode. Writing the plan up front and checking items off as it goes
+measurably improves completion of complex work and gives you a live view of where
+the agent is.
+
+Each todo has a `content` (imperative, e.g. *"Add the parser"*), a `status`
+(`pending` → `in_progress` → `completed`), and an optional `activeForm` (the
+present-continuous label shown while running, e.g. *"Adding the parser"*). The
+rules the model follows:
+
+- Write the whole plan up front; **each call replaces the entire list**.
+- Keep **exactly one** item `in_progress` at a time (the tool rejects more).
+- Mark an item `completed` the moment it's done — no batching.
+- Skip the list entirely for trivial single-step tasks.
+
+The list renders as a live checklist under the tool call:
+
+```
+Todos:
+  ✓ Design the todo tool
+  ✓ Wire it into the registry
+  ▶ Adding tests
+  ☐ Update the README
+(2 done · 1 in progress · 1 pending)
+```
+
+Run **`/todos`** at any time to reprint the agent's current list.
 
 ### Task delegation & parallel subagents
 

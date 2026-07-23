@@ -155,6 +155,7 @@ func init() {
 		{"provider", "/provider <name> [model]", "Switch provider (anthropic, openai, deepseek, custom)", (*Repl).cmdProvider},
 		{"skills", "/skills", "List installed skills (run one with /<skill-name> [task])", (*Repl).cmdSkills},
 		{"tools", "/tools", "List available tools", (*Repl).cmdTools},
+		{"todos", "/todos", "Show the agent's current task list (todo_write)", (*Repl).cmdTodos},
 		{"mcp", "/mcp", "List connected MCP servers and their tools", (*Repl).cmdMCP},
 		{"agents", "/agents", "List subagent types the task tool can delegate to", (*Repl).cmdAgents},
 		{"hooks", "/hooks", "List configured lifecycle hooks (third-party integration)", (*Repl).cmdHooks},
@@ -979,6 +980,19 @@ func (r *Repl) cmdTools(_ context.Context, _ string) error {
 		rows[i] = [2]string{t.Name(), t.Description()}
 	}
 	textwidth.WriteList(r.Out, rows, r.terminalWidth()-2, 2)
+	return nil
+}
+
+// cmdTodos shows the agent's current task list (maintained via the todo_write
+// tool), so the user can see the plan and progress at a glance.
+func (r *Repl) cmdTodos(_ context.Context, _ string) error {
+	if tl, ok := r.Tools.Get("todo_write"); ok {
+		if tw, ok := tl.(*tool.TodoWrite); ok {
+			fmt.Fprintln(r.Out, tool.RenderTodos(tw.Items()))
+			return nil
+		}
+	}
+	fmt.Fprintln(r.Out, "No task list yet — the agent creates one with todo_write for multi-step tasks.")
 	return nil
 }
 

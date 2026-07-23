@@ -60,6 +60,13 @@ func (e *tuiEvents) OnToolResult(name, result string, ok bool) {
 	if !ok {
 		color = tuiRed
 	}
+	// The todo list is meant to be read in full — show every line, indented.
+	if name == "todo_write" {
+		for _, line := range strings.Split(strings.TrimRight(result, "\n"), "\n") {
+			fmt.Fprintf(e.out, "  %s\n", line)
+		}
+		return
+	}
 	// A short preview of the result under the call, dimmed.
 	preview := firstLine(result, 200)
 	fmt.Fprintf(e.out, "  %s⎿%s %s%s%s\n", color, tuiReset, tuiDim, preview, tuiReset)

@@ -324,6 +324,7 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 			&tool.ForgetMemory{Store: memStore},
 			&webtool.WebSearch{Searcher: searcher},
 			&webtool.WebFetch{Extract: extract},
+			&tool.TodoWrite{},
 		}
 	}
 
@@ -589,6 +590,13 @@ func (e *terminalEvents) OnToolResult(name, result string, ok bool) {
 	fmt.Fprintf(e.out, "\033[1A\r\033[2K%s %s\n", dot, e.lastCall)
 
 	lines := strings.Split(result, "\n")
+	// The todo list is meant to be read in full — show every line.
+	if name == "todo_write" {
+		for _, line := range strings.Split(strings.TrimRight(result, "\n"), "\n") {
+			fmt.Fprintf(e.out, "  %s\n", line)
+		}
+		return
+	}
 	// File edits report a unified diff; render it in full and colorized
 	// rather than collapsing it to a one-line preview.
 	if body := diffBody(lines); body != nil {
