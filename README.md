@@ -831,6 +831,8 @@ share the agent's knowledge with your team.
 | `use_skill` | Load an installed skill's instructions on demand |
 | `remember` / `forget` | Save/delete project-scoped memories |
 | `task` | Delegate an independent sub-task to a subagent (see below) |
+| `web_search` | Search the web for current docs, APIs, versions, error explanations |
+| `web_fetch` | Fetch a URL as Markdown; optional `prompt` returns only the relevant part |
 
 ### Task delegation & parallel subagents
 
@@ -976,6 +978,34 @@ Notes:
 - For **observational** events (`PostToolUse`, `Stop`, `SessionStart`/`End`), append `&` to
   fire-and-forget so the network round-trip never blocks the agent.
 
+### Web tools
+
+`web_search` and `web_fetch` let the agent look things up on its own — current library
+versions, an API reference, a changelog, or the meaning of an error message — instead of
+guessing from stale training data.
+
+- **`web_search`** returns titles, URLs, and snippets. The default backend is **DuckDuckGo,
+  which needs no API key** (a best-effort HTML scrape). For higher reliability, configure
+  **Brave** or **Tavily** under `web_search` in `config.json`:
+
+  ```jsonc
+  { "web_search": { "provider": "brave", "env_key": "BRAVE_API_KEY" } }
+  // or: { "web_search": { "provider": "tavily", "api_key": "tvly-..." } }
+  ```
+  (Brave/Tavily read the key from `api_key`, the configured `env_key`, or the standard
+  `BRAVE_API_KEY` / `TAVILY_API_KEY` variable.)
+
+- **`web_fetch`** GETs an http(s) URL and returns its content as **Markdown** — headings,
+  links (`[text](url)`), lists, and code survive, so the model can cite a section or follow a
+  link (plain text/JSON pass through). Following Claude Code, an optional **`prompt`** returns
+  only the parts relevant to it, distilled by the model, instead of the whole page — keeping
+  the conversation lean. Fetches are **cached ~15 min**, bounded by a size cap and a 30 s
+  timeout, and refuse non-http(s) schemes and cloud-metadata/link-local addresses.
+
+A typical loop: `web_search "deepseek api streaming 2026"` → pick a result →
+`web_fetch(url, prompt: "streaming request example")` → use the extracted snippet. Both tools
+are available to subagents too, so a delegated research task can browse on its own.
+
 ### Whitespace-tolerant editing
 
 Exact string replacement is brittle — one differing space, tab, or trailing character makes
@@ -1010,6 +1040,8 @@ internal/subagent/    Task delegation: Spawner + task tool (isolated, parallel s
 internal/permission/  Risk classifier (tokenizing, evasion-resistant), policy rules, audit log
 internal/sandbox/     Command confinement backends (sandbox-exec, bwrap, noop)
 internal/hook/        Lifecycle hooks: external-command integration at extension points
+internal/webtool/     Web tools: web_search (DuckDuckGo/Brave/Tavily) + web_fetch (HTML→text)
+internal/usage/       Token/cost tracking with models.dev pricing (/usage)
 internal/skill/       SKILL.md parsing, discovery (FSRepository), installer
 internal/memory/      AGENT.md loading + file-backed memory store
 internal/session/     Session persistence for /resume (one JSON file per session)

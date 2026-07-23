@@ -127,6 +127,12 @@ type Agent struct {
 	// Usage, when set, records per-turn token consumption and cost keyed by
 	// provider and model (shared across sessions and subagents).
 	Usage *usage.Recorder
+	// Now, when set, supplies the current date. It is injected into each
+	// request as a small note right after the system prompt — never stored in
+	// history and never in the system prompt itself — so the static prompt
+	// stays byte-stable (cacheable across days) while only the day-granularity
+	// note changes. Defaults to no date (nil).
+	Now func() time.Time
 
 	messages []provider.Message
 
@@ -185,7 +191,7 @@ func (a *Agent) RunMessage(ctx context.Context, userMsg provider.Message) (strin
 	for turn := 0; turn < a.MaxTurns; turn++ {
 		resp, streamed, err := a.complete(ctx, provider.Request{
 			Model:    a.Model,
-			Messages: a.messages,
+			Messages: a.requestMessages(),
 			Tools:    toolDefs,
 		})
 		if err != nil {
@@ -363,6 +369,28 @@ func (a *Agent) appendToolResult(call provider.ToolCall, out toolOutcome) {
 		Content:    out.content,
 		ToolCallID: call.ID,
 	})
+}
+
+// requestMessages returns the messages to send, inserting a small current-date
+// note right after the system prompt when Now is set. The note is transient
+// (never stored in a.messages) and sits after the byte-stable system prompt, so
+// the static prefix stays cached while only the day-granularity note changes.
+// For providers with a dedicated system field (Anthropic) the note folds into
+// that field; for message-array providers (OpenAI/DeepSeek) it is a separate
+// message that keeps the system prompt independently cacheable.
+func (a *Agent) requestMessages() []provider.Message {
+	if a.Now == nil || len(a.messages) == 0 {
+		return a.messages
+	}
+	note := provider.Message{
+		Role:    provider.RoleSystem,
+		Content: "Today's date: " + a.Now().Format("2006-01-02"),
+	}
+	out := make([]provider.Message, 0, len(a.messages)+1)
+	out = append(out, a.messages[0]) // system prompt (byte-stable, cached)
+	out = append(out, note)          // volatile date, isolated right after it
+	out = append(out, a.messages[1:]...)
+	return out
 }
 
 // complete performs one model round-trip, streaming when both the provider

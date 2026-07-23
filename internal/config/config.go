@@ -113,6 +113,18 @@ type Config struct {
 	// so any model — including ones the built-in table doesn't know — can be
 	// priced.
 	Prices map[string]PriceConfig `json:"prices,omitempty"`
+	// WebSearch selects the backend for the web_search tool.
+	WebSearch WebSearchConfig `json:"web_search,omitempty"`
+}
+
+// WebSearchConfig selects the web-search backend. Provider is "duckduckgo"
+// (keyless, default), "brave", or "tavily"; the API-key backends read the key
+// from APIKey or the EnvKey environment variable (defaulting to the provider's
+// standard variable).
+type WebSearchConfig struct {
+	Provider string `json:"provider,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	EnvKey   string `json:"env_key,omitempty"`
 }
 
 // PriceConfig is a model's price in USD per one million tokens.
@@ -382,7 +394,37 @@ func mergeFile(cfg *Config, path string) error {
 		}
 		cfg.Prices[model] = price
 	}
+	if layer.WebSearch.Provider != "" {
+		cfg.WebSearch.Provider = layer.WebSearch.Provider
+	}
+	if layer.WebSearch.APIKey != "" {
+		cfg.WebSearch.APIKey = layer.WebSearch.APIKey
+	}
+	if layer.WebSearch.EnvKey != "" {
+		cfg.WebSearch.EnvKey = layer.WebSearch.EnvKey
+	}
 	return nil
+}
+
+// WebSearchKey resolves the web-search API key from the config or environment.
+// It reads the explicit key, then the configured EnvKey, then the provider's
+// standard variable (BRAVE_API_KEY / TAVILY_API_KEY).
+func (c *Config) WebSearchKey() string {
+	if c.WebSearch.APIKey != "" {
+		return c.WebSearch.APIKey
+	}
+	if c.WebSearch.EnvKey != "" {
+		if v := os.Getenv(c.WebSearch.EnvKey); v != "" {
+			return v
+		}
+	}
+	switch strings.ToLower(c.WebSearch.Provider) {
+	case "brave":
+		return os.Getenv("BRAVE_API_KEY")
+	case "tavily":
+		return os.Getenv("TAVILY_API_KEY")
+	}
+	return ""
 }
 
 // applyEnv overlays environment variables. AGENT_* wins over

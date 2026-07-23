@@ -140,6 +140,9 @@ func (s *Spawner) Run(ctx context.Context, typeName, taskPrompt string) (string,
 	child := agent.New(prov, model, reg, def.Prompt, events, s.MaxTurns)
 	child.Gate = s.Gate
 	child.Usage = s.Usage
+	if s.Parent != nil {
+		child.Now = s.Parent.Now // subagents get today's date too
+	}
 	// A subagent never compacts: it is short-lived and its whole point is to
 	// keep its context out of the parent, so it just runs to completion.
 

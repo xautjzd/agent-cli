@@ -11,6 +11,13 @@ import (
 // PromptBuilder assembles the system prompt from static instructions,
 // AGENT.md files, saved memories and skill metadata. Isolating this in one
 // type keeps prompt policy independent of the conversation loop (SRP).
+//
+// The system prompt holds NO volatile data (no date). Keeping it byte-stable
+// lets it stay cached indefinitely — even across a day boundary, which matters
+// for providers whose prefix cache is long-lived (e.g. DeepSeek's disk cache).
+// The current date is supplied separately, as a small context note inserted
+// right after the system prompt at request time (see Agent.Now), so only that
+// tiny note — not the whole static prefix — changes when the day rolls over.
 type PromptBuilder struct {
 	WorkDir string
 	Skills  skill.Repository
@@ -25,6 +32,7 @@ Rules:
 - After changing code, verify it (build, tests) with the bash tool before declaring success.
 - When a task matches an available skill's description, call use_skill first and follow its instructions.
 - Save durable, non-obvious project knowledge with the remember tool; keep memories short and factual.
+- For anything time-sensitive — "latest", "recent", "current", news, versions, prices — use the current date provided in context (not your training data), and the correct current year in web_search queries.
 - Be concise. Report what you did and what you verified.`
 
 // Build produces the full system prompt.

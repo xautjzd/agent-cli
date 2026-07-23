@@ -40,6 +40,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/subagent"
 	"github.com/xautjzd/agent-cli/internal/textwidth"
 	"github.com/xautjzd/agent-cli/internal/usage"
+	"github.com/xautjzd/agent-cli/internal/webtool"
 
 	"github.com/xautjzd/agent-cli/internal/tool"
 	"golang.org/x/term"
@@ -286,6 +287,25 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 		fmt.Fprintf(os.Stderr, "warning: sandbox requested but unavailable — %s\n", sbox.Reason())
 	}
 
+	// Web tools: web_search finds current docs/APIs/errors, web_fetch reads a
+	// page. The search backend is keyless DuckDuckGo by default; Brave/Tavily
+	// via config. web_fetch's optional prompt is answered by distilling the
+	// fetched page with the model (Claude Code style).
+	searcher := webtool.NewSearcher(cfg.WebSearch.Provider, cfg.WebSearchKey(), nil)
+	extract := func(ctx context.Context, prompt, content string) (string, error) {
+		resp, err := p.Chat(ctx, provider.Request{
+			Model: cfg.Model,
+			Messages: []provider.Message{
+				{Role: provider.RoleSystem, Content: "You extract the parts of a fetched web page that are relevant to the user's request. Quote exact code, signatures, values, and version numbers verbatim. Be concise; if nothing is relevant, say so."},
+				{Role: provider.RoleUser, Content: "Request: " + prompt + "\n\n" + content},
+			},
+		})
+		if err != nil {
+			return "", err
+		}
+		return resp.Message.Content, nil
+	}
+
 	// buildBaseTools produces one fresh set of the built-in tools. It is used
 	// both for the main registry and to give each subagent its own isolated
 	// tools — it deliberately excludes the "task" tool so a subagent cannot
@@ -302,6 +322,8 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 			&tool.UseSkill{Repo: skillRepo},
 			&tool.Remember{Store: memStore},
 			&tool.ForgetMemory{Store: memStore},
+			&webtool.WebSearch{Searcher: searcher},
+			&webtool.WebFetch{Extract: extract},
 		}
 	}
 
@@ -355,6 +377,10 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	ag.AutoCompact = cfg.AutoCompact != "off"
 	ag.ContextLimit = cfg.ContextLimit
 	ag.Usage = usageRec
+	// Supply today's date as a small note after the (byte-stable) system
+	// prompt, so time-sensitive answers are correct without churning the
+	// cacheable prefix.
+	ag.Now = time.Now
 	// Subagents inherit the parent's current provider/model, so a mid-session
 	// /provider or /model switch applies to delegated work too.
 	spawner.Parent = ag
