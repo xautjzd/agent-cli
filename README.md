@@ -11,6 +11,8 @@ memory.
 - **Agentic loop** — the model plans, calls tools, reads results, and iterates until done.
 - **Built-in tools** — `bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`,
   `list_dir`, `use_skill`, `remember`, `forget`, `web_search`, `web_fetch`, `todo_write`.
+- **Code navigation (LSP)** — `lsp_diagnostics`, `lsp_references`, `lsp_definition`, `lsp_hover`
+  backed by language servers (gopls, tsserver, pyright, rust-analyzer, clangd); scope-aware and diagnostic-driven.
 - **Skills** — install and invoke SKILL.md-based skills; shares the standard
   `~/.agent/skills` directory so skills are reusable across agent tools; project-local
   `.agent/skills` can shadow global skills.
@@ -167,6 +169,7 @@ picker instead. Commands:
 | `/tools` | List available tools (aligned two-column layout) |
 | `/todos` | Show the agent's current task list (from `todo_write`) |
 | `/mcp` | List connected MCP servers, their transport, and the tools each contributed |
+| `/lsp` | List language servers backing the code-navigation tools (installed/running status) |
 | `/agents` | List subagent types the `task` tool can delegate to |
 | `/hooks` | List configured lifecycle hooks (third-party integration) |
 | `/config` | Open the settings panel (view + edit combined) |
@@ -867,6 +870,39 @@ share the agent's knowledge with your team.
 | `web_search` | Search the web for current docs, APIs, versions, error explanations |
 | `web_fetch` | Fetch a URL as Markdown; optional `prompt` returns only the relevant part |
 | `todo_write` | Maintain a structured todo list to plan and track a multi-step task (see below) |
+| `lsp_diagnostics` | Compiler/linter errors & warnings for a file, from its language server (see below) |
+| `lsp_references` | Find every reference to a symbol (scope-aware, unlike text search) |
+| `lsp_definition` | Jump to where a symbol is defined |
+| `lsp_hover` | A symbol's type signature and documentation |
+
+### Code navigation (LSP)
+
+The agent understands code the way an editor does, through Language Server
+Protocol servers. `lsp_diagnostics` surfaces compiler/linter problems (the model
+is prompted to run it after editing a file, catching a broken edit before it
+moves on); `lsp_references`, `lsp_definition`, and `lsp_hover` give scope-aware
+navigation that beats grep because the server understands imports, scope, and
+shadowing.
+
+Servers start lazily on first use and are routed by file extension. Built-in
+defaults (used when the binary is installed): **gopls** (Go),
+**typescript-language-server**, **pyright** (Python), **rust-analyzer**,
+**clangd** (C/C++). `/lsp` lists them and shows which are installed and running.
+
+Add or override a server with the `lspServers` config key:
+
+```json
+{
+  "lspServers": {
+    "go":  {"command": "gopls"},
+    "zig": {"command": "zls", "extensions": [".zig"]}
+  }
+}
+```
+
+Only the fields you set override the default; omit `extensions` to keep the
+built-in ones. The reference/definition/hover tools take a `path`, the 1-based
+`line` the symbol is on (as shown by `read_file`), and the `symbol` text.
 
 ### Task planning & progress tracking
 

@@ -31,6 +31,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/hook"
+	"github.com/xautjzd/agent-cli/internal/lsp"
 	"github.com/xautjzd/agent-cli/internal/mcp"
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/permission"
@@ -112,6 +113,8 @@ func run(args []string) error {
 	if sess != nil {
 		// Terminate MCP child processes and connections on exit.
 		defer sess.MCP.Close()
+		// Shut down any language servers started during the session.
+		defer sess.LSP.Close()
 	}
 	if err != nil {
 		return err
@@ -318,8 +321,11 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	// tools are built by this closure too), so delegated edits are undoable as
 	// well.
 	checkpoints := checkpoint.NewManager()
+	// Language servers back the code-navigation tools; shared across the main
+	// agent and subagents. Servers start lazily on first use.
+	lspMgr := lsp.NewManager(workDir, lspOverrides(cfg))
 	buildBaseTools := func() []tool.Tool {
-		return []tool.Tool{
+		tools := []tool.Tool{
 			&tool.Bash{WorkDir: workDir, Sandbox: sbox, DenyNetwork: cfg.SandboxDenyNetwork},
 			&tool.ReadFile{WorkDir: workDir},
 			&tool.WriteFile{WorkDir: workDir, Snapshot: checkpoints},
@@ -334,6 +340,7 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 			&webtool.WebFetch{Extract: extract},
 			&tool.TodoWrite{},
 		}
+		return append(tools, lsp.Tools(lspMgr, workDir)...)
 	}
 
 	registry := tool.NewRegistry(buildBaseTools()...)
@@ -408,6 +415,7 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 		Hooks:         buildHooks(cfg),
 		Sessions:      session.NewProjectStore(workDir),
 		Checkpoints:   checkpoints,
+		LSP:           lspMgr,
 		WorkDir:       workDir,
 		In:            os.Stdin,
 		Out:           os.Stdout,
@@ -478,6 +486,23 @@ func buildPolicy(cfg *config.Config, workDir string) *permission.Policy {
 
 // subagentDefs builds the subagent type table: the built-in general-purpose
 // type plus any custom types declared under "subagents" in the config.
+// lspOverrides translates the configured language servers into the lsp
+// package's server definitions, which are merged over its built-in defaults.
+func lspOverrides(cfg *config.Config) []lsp.ServerDef {
+	var defs []lsp.ServerDef
+	for lang, s := range cfg.LSPServers {
+		defs = append(defs, lsp.ServerDef{
+			Lang:       lang,
+			Command:    s.Command,
+			Args:       s.Args,
+			Env:        s.Env,
+			Extensions: s.Extensions,
+			Disabled:   s.Disabled,
+		})
+	}
+	return defs
+}
+
 func subagentDefs(cfg *config.Config) map[string]subagent.Definition {
 	defs := map[string]subagent.Definition{
 		subagent.DefaultDefinition.Name: subagent.DefaultDefinition,

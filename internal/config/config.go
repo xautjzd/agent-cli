@@ -104,6 +104,11 @@ type Config struct {
 	// merged into the agent's tool set at startup, keyed by a short server
 	// name (Claude Code's "mcpServers" convention).
 	MCPServers map[string]MCPServerConfig `json:"mcpServers,omitempty"`
+	// LSPServers declares Language Server Protocol servers backing the code
+	// navigation tools (lsp_diagnostics/references/definition/hover), keyed by
+	// language name. Entries override or extend the built-in defaults (gopls,
+	// typescript-language-server, pyright, rust-analyzer, clangd).
+	LSPServers map[string]LSPServerConfig `json:"lspServers,omitempty"`
 	// Subagents declares custom subagent types the "task" tool can delegate
 	// to, keyed by type name. The built-in general-purpose type is always
 	// available.
@@ -209,6 +214,26 @@ func (m MCPServerConfig) Transport() string {
 		return "http"
 	}
 	return ""
+}
+
+// LSPServerConfig describes one Language Server Protocol server for the code
+// navigation tools. Fields left empty fall back to the built-in default for
+// that language, so `{"command": "gopls"}` is enough to override just the
+// binary, and a new language needs only command + extensions.
+//
+//	"lspServers": {"go": {"command": "gopls"},
+//	               "zig": {"command": "zls", "extensions": [".zig"]}}
+type LSPServerConfig struct {
+	// Command and Args launch the server over stdio.
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+	// Env adds environment variables for the server process.
+	Env map[string]string `json:"env,omitempty"`
+	// Extensions are the file suffixes (with dot) this server handles; empty
+	// keeps the built-in default's extensions for that language.
+	Extensions []string `json:"extensions,omitempty"`
+	// Disabled skips the language without removing its entry.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // Scope selects which config file a write targets.
@@ -380,6 +405,12 @@ func mergeFile(cfg *Config, path string) error {
 			cfg.MCPServers = map[string]MCPServerConfig{}
 		}
 		cfg.MCPServers[name] = s
+	}
+	for name, s := range layer.LSPServers {
+		if cfg.LSPServers == nil {
+			cfg.LSPServers = map[string]LSPServerConfig{}
+		}
+		cfg.LSPServers[name] = s
 	}
 	for name, s := range layer.Subagents {
 		if cfg.Subagents == nil {

@@ -30,6 +30,7 @@ Rules:
 - Use the provided tools to inspect and modify the project; never fabricate file contents or command output.
 - Prefer edit_file for small changes and write_file only for new or fully rewritten files.
 - After changing code, verify it (build, tests) with the bash tool before declaring success.
+- Use the language-server tools for code navigation and understanding when available: lsp_diagnostics after editing a file to catch errors/warnings early, lsp_references before changing or removing a symbol to find every use, and lsp_definition/lsp_hover to resolve a symbol's definition, type, or documentation. They are more accurate than text search; fall back to grep when no server handles the language.
 - For any multi-step or non-trivial task, use the todo_write tool to plan and track it: write the todo list up front, mark exactly one item in_progress before starting it, and mark it completed the moment it is done. Skip it for trivial single-step tasks.
 - When a task matches an available skill's description, call use_skill first and follow its instructions.
 - Save durable, non-obvious project knowledge with the remember tool; keep memories short and factual.

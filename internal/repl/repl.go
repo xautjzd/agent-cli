@@ -23,6 +23,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/hook"
+	"github.com/xautjzd/agent-cli/internal/lsp"
 	"github.com/xautjzd/agent-cli/internal/mcp"
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/permission"
@@ -60,6 +61,10 @@ type Repl struct {
 	// Checkpoints records a restore point before each turn (conversation
 	// position + file snapshots) backing /rewind; nil disables the feature.
 	Checkpoints *checkpoint.Manager
+
+	// LSP manages language servers backing the code-navigation tools; nil
+	// disables the /lsp listing (the tools themselves are still registered).
+	LSP *lsp.Manager
 
 	// MCP holds the live Model Context Protocol connections whose tools are
 	// merged into Tools; nil when no MCP servers are configured. The REPL
@@ -168,6 +173,7 @@ func init() {
 		{"tools", "/tools", "List available tools", (*Repl).cmdTools},
 		{"todos", "/todos", "Show the agent's current task list (todo_write)", (*Repl).cmdTodos},
 		{"mcp", "/mcp", "List connected MCP servers and their tools", (*Repl).cmdMCP},
+		{"lsp", "/lsp", "List language servers backing the code-navigation tools", (*Repl).cmdLSP},
 		{"agents", "/agents", "List subagent types the task tool can delegate to", (*Repl).cmdAgents},
 		{"hooks", "/hooks", "List configured lifecycle hooks (third-party integration)", (*Repl).cmdHooks},
 		{"config", "/config [set k v]", "Open the settings panel (view + edit); or set one value", (*Repl).cmdConfig},
@@ -1080,6 +1086,35 @@ func (r *Repl) cmdCommands(_ context.Context, _ string) error {
 	}
 	textwidth.WriteList(r.Out, rows, r.terminalWidth()-2, 2)
 	fmt.Fprintf(r.Out, "\n%d custom command(s). Use $ARGUMENTS or $1,$2… in the body for arguments.\n", len(cmds))
+	return nil
+}
+
+// cmdLSP lists the language servers backing the code-navigation tools, showing
+// which are installed and which are currently running.
+func (r *Repl) cmdLSP(_ context.Context, _ string) error {
+	if r.LSP == nil {
+		fmt.Fprintln(r.Out, "Language servers are not configured.")
+		return nil
+	}
+	statuses := r.LSP.Status()
+	fmt.Fprintln(r.Out, "Language servers (tools: lsp_diagnostics, lsp_references, lsp_definition, lsp_hover):")
+	rows := make([][2]string, 0, len(statuses))
+	for _, s := range statuses {
+		state := "not installed"
+		switch {
+		case s.Disabled:
+			state = "disabled"
+		case s.Running:
+			state = "running"
+		case s.Available:
+			state = "ready"
+		}
+		left := fmt.Sprintf("%s (%s)", s.Lang, s.Command)
+		right := fmt.Sprintf("%s — %s", state, strings.Join(s.Extensions, " "))
+		rows = append(rows, [2]string{left, right})
+	}
+	textwidth.WriteList(r.Out, rows, r.terminalWidth()-2, 1)
+	fmt.Fprintln(r.Out, "\nServers start on first use. Add or override one with the \"lspServers\" config key.")
 	return nil
 }
 
