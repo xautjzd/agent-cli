@@ -19,7 +19,9 @@ import (
 	"github.com/xautjzd/agent-cli/internal/agent"
 	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/checkpoint"
+	usercmd "github.com/xautjzd/agent-cli/internal/command"
 	"github.com/xautjzd/agent-cli/internal/config"
+	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/hook"
 	"github.com/xautjzd/agent-cli/internal/mcp"
 	"github.com/xautjzd/agent-cli/internal/memory"
@@ -39,14 +41,17 @@ var errExit = errors.New("exit")
 // Repl drives the interactive session. It owns input parsing and command
 // dispatch; the agent owns the conversation (SRP: UI concerns stay here).
 type Repl struct {
-	Agent   *agent.Agent
-	Cfg     *config.Config
-	Skills  skill.Repository
-	Memory  memory.Store
-	Tools   *tool.Registry
-	WorkDir string
-	In      io.Reader
-	Out     io.Writer
+	Agent  *agent.Agent
+	Cfg    *config.Config
+	Skills skill.Repository
+	// Commands holds user-defined slash commands (prompt templates); nil
+	// disables them.
+	Commands usercmd.Repository
+	Memory   memory.Store
+	Tools    *tool.Registry
+	WorkDir  string
+	In       io.Reader
+	Out      io.Writer
 
 	// Sessions persists conversation history for /resume; nil disables
 	// session recording.
@@ -159,6 +164,7 @@ func init() {
 		{"model", "/model [name]", "Show or switch the model", (*Repl).cmdModel},
 		{"provider", "/provider <name> [model]", "Switch provider (anthropic, openai, deepseek, custom)", (*Repl).cmdProvider},
 		{"skills", "/skills", "List installed skills (run one with /<skill-name> [task])", (*Repl).cmdSkills},
+		{"commands", "/commands", "List user-defined slash commands (run one with /<name> [args])", (*Repl).cmdCommands},
 		{"tools", "/tools", "List available tools", (*Repl).cmdTools},
 		{"todos", "/todos", "Show the agent's current task list (todo_write)", (*Repl).cmdTodos},
 		{"mcp", "/mcp", "List connected MCP servers and their tools", (*Repl).cmdMCP},
@@ -435,11 +441,41 @@ func (r *Repl) dispatch(ctx context.Context, input string) error {
 			return c.handler(r, ctx, args)
 		}
 	}
-	// Not a built-in: treat "/<skill-name> [task]" as explicit skill use.
+	// Not a built-in: a user-defined slash command takes precedence over a
+	// skill of the same name, since the user authored it as a command.
+	if r.Commands != nil {
+		if _, err := r.Commands.Load(name); err == nil {
+			return r.invokeCommand(ctx, name, args)
+		}
+	}
+	// Finally treat "/<skill-name> [task]" as explicit skill use.
 	if _, err := r.Skills.Load(name); err == nil {
 		return r.invokeSkill(ctx, name, args)
 	}
 	return fmt.Errorf("unknown command or skill %q — type / to list both", name)
+}
+
+// invokeCommand runs a user-defined slash command: its prompt body is filled
+// with the arguments and any @file references, then sent to the agent as an
+// ordinary user turn. The raw "/name args" is what the session records.
+func (r *Repl) invokeCommand(ctx context.Context, name, args string) error {
+	cmd, err := r.Commands.Load(name)
+	if err != nil {
+		return err
+	}
+	prompt := usercmd.Expand(cmd.Body, args)
+	if prompt, err = ExpandFileRefs(prompt, r.WorkDir); err != nil {
+		return err
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return fmt.Errorf("command %q has an empty prompt", name)
+	}
+	_, err = r.Agent.Run(ctx, prompt)
+	r.saveSession(strings.TrimSpace("/" + name + " " + args))
+	if err != nil {
+		return err
+	}
+	return r.checkGoal(ctx)
 }
 
 // picker renders a numbered menu of commands and skills and executes the
@@ -450,12 +486,22 @@ func (r *Repl) picker(ctx context.Context) error {
 	for i, c := range commands {
 		fmt.Fprintf(r.Out, "  %2d. %-28s %s\n", i+1, c.usage, c.desc)
 	}
+	var customs []usercmd.Command
+	if r.Commands != nil {
+		customs, _ = r.Commands.List()
+	}
+	for i, c := range customs {
+		if i == 0 {
+			fmt.Fprintln(r.Out, "Custom commands:")
+		}
+		fmt.Fprintf(r.Out, "  %2d. %-28s %s\n", len(commands)+i+1, "/"+c.Name, c.Description)
+	}
 	skills, _ := r.Skills.List()
 	for i, s := range skills {
 		if i == 0 {
 			fmt.Fprintln(r.Out, "Skills:")
 		}
-		fmt.Fprintf(r.Out, "  %2d. %-28s %s\n", len(commands)+i+1, "/"+s.Name, s.Description)
+		fmt.Fprintf(r.Out, "  %2d. %-28s %s\n", len(commands)+len(customs)+i+1, "/"+s.Name, s.Description)
 	}
 
 	line, ok := r.readInput("Select a number (or press Enter to cancel): ")
@@ -467,7 +513,7 @@ func (r *Repl) picker(ctx context.Context) error {
 		return nil
 	}
 	n, err := strconv.Atoi(choice)
-	if err != nil || n < 1 || n > len(commands)+len(skills) {
+	if err != nil || n < 1 || n > len(commands)+len(customs)+len(skills) {
 		return fmt.Errorf("invalid selection %q", choice)
 	}
 
@@ -479,7 +525,19 @@ func (r *Repl) picker(ctx context.Context) error {
 		}
 		return c.handler(r, ctx, strings.TrimSpace(args))
 	}
-	s := skills[n-len(commands)-1]
+	if n <= len(commands)+len(customs) {
+		c := customs[n-len(commands)-1]
+		hint := c.ArgumentHint
+		if hint == "" {
+			hint = "or Enter for none"
+		}
+		args, ok := r.readInput(fmt.Sprintf("Arguments for /%s (%s): ", c.Name, hint))
+		if !ok {
+			return errExit
+		}
+		return r.invokeCommand(ctx, c.Name, strings.TrimSpace(args))
+	}
+	s := skills[n-len(commands)-len(customs)-1]
 	task, ok := r.readInput("Task for the skill (or Enter to just apply it): ")
 	if !ok {
 		return errExit
@@ -993,6 +1051,35 @@ func (r *Repl) cmdSkills(_ context.Context, _ string) error {
 	}
 	textwidth.WriteList(r.Out, rows, r.terminalWidth()-2, 2)
 	fmt.Fprintf(r.Out, "\n%d skill(s). Run \"agent skill show <name>\" for the full instructions.\n", len(skills))
+	return nil
+}
+
+// cmdCommands lists user-defined slash commands and where to add more.
+func (r *Repl) cmdCommands(_ context.Context, _ string) error {
+	var cmds []usercmd.Command
+	if r.Commands != nil {
+		cmds, _ = r.Commands.List()
+	}
+	if len(cmds) == 0 {
+		fmt.Fprintf(r.Out, "No custom commands. Add one as a markdown file in %s "+
+			"(personal) or .agent/commands (this project), then run it with /<name>.\n",
+			home.Path("commands"))
+		return nil
+	}
+	rows := make([][2]string, len(cmds))
+	for i, c := range cmds {
+		name := "/" + c.Name
+		if c.ArgumentHint != "" {
+			name += " " + c.ArgumentHint
+		}
+		origin := "user"
+		if c.Project {
+			origin = "project"
+		}
+		rows[i] = [2]string{name, fmt.Sprintf("%s (%s)", c.Description, origin)}
+	}
+	textwidth.WriteList(r.Out, rows, r.terminalWidth()-2, 2)
+	fmt.Fprintf(r.Out, "\n%d custom command(s). Use $ARGUMENTS or $1,$2… in the body for arguments.\n", len(cmds))
 	return nil
 }
 

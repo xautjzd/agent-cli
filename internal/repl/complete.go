@@ -165,6 +165,13 @@ func (r *Repl) commandCandidates(query string) []candidate {
 	for _, c := range commands {
 		add(c.name, c.desc)
 	}
+	if r.Commands != nil {
+		if customs, err := r.Commands.List(); err == nil {
+			for _, c := range customs {
+				add(c.Name, "command: "+c.Description)
+			}
+		}
+	}
 	if skills, err := r.Skills.List(); err == nil {
 		for _, s := range skills {
 			add(s.Name, "skill: "+s.Description)

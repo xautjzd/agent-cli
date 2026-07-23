@@ -161,7 +161,9 @@ picker instead. Commands:
 | `/model [name]` | Show or switch the model mid-session |
 | `/provider <name> [model]` | Switch provider mid-session (prompts for the API key if none is set, and offers to save it) |
 | `/<skill-name> [task]` | Run any installed skill as a slash command, optionally with a task |
+| `/<command> [args]` | Run a user-defined slash command (see below) |
 | `/skills` | List installed skills (aligned; `agent skill show <name>` for full text) |
+| `/commands` | List user-defined slash commands |
 | `/tools` | List available tools (aligned two-column layout) |
 | `/todos` | Show the agent's current task list (from `todo_write`) |
 | `/mcp` | List connected MCP servers, their transport, and the tools each contributed |
@@ -188,6 +190,36 @@ Example session:
 > explain @internal/repl/repl.go
 > /clear
 ```
+
+### Custom slash commands
+
+Drop a markdown file into a `commands` directory and it becomes a `/`-command —
+a reusable prompt template, the same idea as Claude Code's `.claude/commands`:
+
+- **Personal** — `~/.agent/commands/<name>.md` (available in every project)
+- **Project** — `.agent/commands/<name>.md` (checked into the repo, shared with the team; shadows a personal command of the same name)
+
+Nested directories namespace the command: `commands/git/commit.md` → `/git:commit`.
+
+The file is an optional `---` frontmatter block (`description`, `argument-hint`)
+followed by the prompt body. Arguments are substituted into the body:
+
+- `$ARGUMENTS` — the full argument string
+- `$1`, `$2`, … — positional arguments (whitespace-split)
+- if the body has no placeholder, the arguments are appended to it
+
+`@path` file references in the result are expanded just like a typed prompt.
+When filled, the prompt is sent to the agent as an ordinary turn.
+
+```markdown
+---
+description: Review a pull request
+argument-hint: <pr-number>
+---
+Review PR #$1 for correctness, tests, and style. Summarize risks first.
+```
+
+Then run it: `/review 42`. List what's available with `/commands`.
 
 ### Sessions & resume
 

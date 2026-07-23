@@ -27,6 +27,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/agent"
 	"github.com/xautjzd/agent-cli/internal/checkpoint"
+	"github.com/xautjzd/agent-cli/internal/command"
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/hook"
@@ -278,6 +279,7 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	repl.MigratePastes(workDir)
 
 	skillRepo := &skill.FSRepository{Roots: skill.DefaultRoots(workDir)}
+	cmdRepo := command.NewRepository(workDir)
 	memStore := memory.NewProjectStore(workDir)
 
 	// Optional command sandboxing (defense in depth beneath the permission
@@ -395,6 +397,7 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 		Agent:         ag,
 		Cfg:           cfg,
 		Skills:        skillRepo,
+		Commands:      cmdRepo,
 		Memory:        memStore,
 		Tools:         registry,
 		MCP:           mcpMgr,
