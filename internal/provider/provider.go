@@ -42,6 +42,11 @@ type Config struct {
 	// Auth selects the credential header for Anthropic-format endpoints:
 	// "bearer" sends Authorization: Bearer, anything else sends x-api-key.
 	Auth string
+	// PromptCache toggles Anthropic prompt caching (cache_control
+	// breakpoints on tools, the system prompt and recent turns). It is on
+	// by default; set "off" to disable it for a compatible gateway that
+	// rejects the cache_control field.
+	PromptCache string
 }
 
 // Factory builds a Provider from configuration.

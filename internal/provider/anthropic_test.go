@@ -442,6 +442,131 @@ func TestAnthropicStreaming(t *testing.T) {
 	}
 }
 
+// lastBlockCacheControl reports whether the final content block of the given
+// message carries an ephemeral cache_control breakpoint.
+func lastBlockCacheControl(msg map[string]any) bool {
+	blocks, ok := msg["content"].([]any)
+	if !ok || len(blocks) == 0 {
+		return false
+	}
+	last, ok := blocks[len(blocks)-1].(map[string]any)
+	if !ok {
+		return false
+	}
+	cc, ok := last["cache_control"].(map[string]any)
+	return ok && cc["type"] == "ephemeral"
+}
+
+func TestAnthropicPromptCaching(t *testing.T) {
+	stub := &anthropicStub{reply: textReply}
+	srv := stub.server(t)
+	defer srv.Close()
+
+	_, err := newAnthropic(t, srv, "off").Chat(context.Background(), Request{
+		Messages: []Message{
+			{Role: RoleSystem, Content: "you are a coding agent"},
+			{Role: RoleUser, Content: "first"},
+			{Role: RoleAssistant, Content: "ok"},
+			{Role: RoleUser, Content: "second"},
+		},
+		Tools: []ToolDef{{
+			Name:        "bash",
+			Description: "run a command",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}}}`),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The last tool definition carries a cache breakpoint (caches all tools).
+	tools := stub.body["tools"].([]any)
+	tool := tools[len(tools)-1].(map[string]any)
+	if cc, ok := tool["cache_control"].(map[string]any); !ok || cc["type"] != "ephemeral" {
+		t.Errorf("last tool missing cache_control: %#v", tool["cache_control"])
+	}
+
+	// The last system block carries a breakpoint (caches tools + system).
+	system := stub.body["system"].([]any)
+	sysBlock := system[len(system)-1].(map[string]any)
+	if cc, ok := sysBlock["cache_control"].(map[string]any); !ok || cc["type"] != "ephemeral" {
+		t.Errorf("last system block missing cache_control: %#v", sysBlock["cache_control"])
+	}
+
+	// The two most recent messages are marked so the growing conversation is
+	// re-read from cache on the next turn.
+	msgs := stub.body["messages"].([]any)
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(msgs))
+	}
+	if !lastBlockCacheControl(msgs[2].(map[string]any)) {
+		t.Error("last message not marked for caching")
+	}
+	if !lastBlockCacheControl(msgs[1].(map[string]any)) {
+		t.Error("second-to-last message not marked for caching")
+	}
+	// Only the two most recent are marked; older turns are covered by the
+	// prefix and need no breakpoint of their own.
+	if lastBlockCacheControl(msgs[0].(map[string]any)) {
+		t.Error("oldest message should not carry its own breakpoint")
+	}
+}
+
+func TestAnthropicPromptCachingDisabled(t *testing.T) {
+	stub := &anthropicStub{reply: textReply}
+	srv := stub.server(t)
+	defer srv.Close()
+
+	p, err := NewAnthropic("gw", Config{APIKey: "k", BaseURL: srv.URL, PromptCache: "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.Chat(context.Background(), Request{
+		Messages: []Message{
+			{Role: RoleSystem, Content: "sys"},
+			{Role: RoleUser, Content: "hi"},
+		},
+		Tools: []ToolDef{{Name: "bash", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := stub.body["tools"].([]any)[0].(map[string]any)
+	if _, present := tool["cache_control"]; present {
+		t.Error("cache_control must be absent when prompt caching is off")
+	}
+	if lastBlockCacheControl(stub.body["messages"].([]any)[0].(map[string]any)) {
+		t.Error("messages must not be marked when prompt caching is off")
+	}
+}
+
+func TestAnthropicCacheUsageReported(t *testing.T) {
+	// Anthropic reports the uncached input separately from cache reads and
+	// writes; PromptTokens must fold them back into the full input count.
+	const cachedReply = `{"id":"m","type":"message","role":"assistant","model":"claude-opus-4-8",
+	 "content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn",
+	 "usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":900}}`
+	stub := &anthropicStub{reply: cachedReply}
+	srv := stub.server(t)
+	defer srv.Close()
+
+	resp, err := newAnthropic(t, srv, "off").Chat(context.Background(), Request{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage.PromptTokens != 1010 {
+		t.Errorf("PromptTokens = %d, want 1010 (10 + 100 + 900)", resp.Usage.PromptTokens)
+	}
+	if resp.Usage.CacheCreationTokens != 100 || resp.Usage.CacheReadTokens != 900 {
+		t.Errorf("cache tokens = create %d read %d", resp.Usage.CacheCreationTokens, resp.Usage.CacheReadTokens)
+	}
+	if resp.Usage.TotalTokens != 1015 {
+		t.Errorf("TotalTokens = %d, want 1015", resp.Usage.TotalTokens)
+	}
+}
+
 func TestAnthropicCompatibleGatewayNaming(t *testing.T) {
 	// A third-party Anthropic-compatible endpoint is addressed through a
 	// named profile; the provider reports that name in output and errors.

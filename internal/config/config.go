@@ -79,6 +79,10 @@ type Config struct {
 	// Thinking controls extended thinking on providers that support it
 	// (Anthropic): "off" disables it; empty uses the provider default.
 	Thinking string `json:"thinking,omitempty"`
+	// PromptCache controls Anthropic prompt caching: "off" disables the
+	// cache_control breakpoints; empty leaves them on (the default). Set it
+	// off for a compatible gateway that rejects the field.
+	PromptCache string `json:"prompt_cache,omitempty"`
 	// VisionProvider/VisionModel name a fallback used to describe images
 	// when the primary model has no vision support: the image turn is
 	// pre-processed by this model and the description is fed to the
@@ -350,6 +354,9 @@ func mergeFile(cfg *Config, path string) error {
 	if layer.Thinking != "" {
 		cfg.Thinking = layer.Thinking
 	}
+	if layer.PromptCache != "" {
+		cfg.PromptCache = layer.PromptCache
+	}
 	if layer.VisionProvider != "" {
 		cfg.VisionProvider = layer.VisionProvider
 	}
@@ -589,7 +596,7 @@ func LoadFor(providerName string) (*Config, error) {
 // profiles (providers-map entries) become OpenAI-compatible clients under
 // their profile name; everything else goes through the built-in registry.
 func (c *Config) BuildProvider() (provider.Provider, error) {
-	pc := provider.Config{APIKey: c.APIKey, BaseURL: c.BaseURL, Model: c.Model, Thinking: c.Thinking}
+	pc := provider.Config{APIKey: c.APIKey, BaseURL: c.BaseURL, Model: c.Model, Thinking: c.Thinking, PromptCache: c.PromptCache}
 	if p, ok := c.Providers[c.Provider]; ok {
 		pc.Auth = p.Auth
 		return provider.NewProfile(c.Provider, p.Format, pc)

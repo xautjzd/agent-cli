@@ -18,6 +18,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/agent"
 	"github.com/xautjzd/agent-cli/internal/catalog"
+	"github.com/xautjzd/agent-cli/internal/checkpoint"
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/hook"
 	"github.com/xautjzd/agent-cli/internal/mcp"
@@ -50,6 +51,10 @@ type Repl struct {
 	// Sessions persists conversation history for /resume; nil disables
 	// session recording.
 	Sessions session.Store
+
+	// Checkpoints records a restore point before each turn (conversation
+	// position + file snapshots) backing /rewind; nil disables the feature.
+	Checkpoints *checkpoint.Manager
 
 	// MCP holds the live Model Context Protocol connections whose tools are
 	// merged into Tools; nil when no MCP servers are configured. The REPL
@@ -168,6 +173,7 @@ func init() {
 		{"rename", "/rename [title]", "Rename the current session", (*Repl).cmdRename},
 		{"new", "/new", "Start a new session (current one stays resumable)", (*Repl).cmdNew},
 		{"resume", "/resume [id]", "Resume a previous session in this project", (*Repl).cmdResume},
+		{"rewind", "/rewind", "Undo to a checkpoint: restore files and conversation to before an earlier message", (*Repl).cmdRewind},
 		{"compact", "/compact", "Summarize earlier turns to free up context now", (*Repl).cmdCompact},
 		{"clear", "/clear", "Clear conversation history (keeps system prompt)", (*Repl).cmdClear},
 		{"exit", "/exit", "Quit the session", (*Repl).cmdExit},
@@ -325,6 +331,12 @@ func (r *Repl) runPrompt(ctx context.Context, input string) error {
 	if msg, err = r.prepareImageMessage(ctx, msg); err != nil {
 		return err
 	}
+	// Open a restore point before the turn runs, capturing the conversation
+	// position; the turn's file edits snapshot into it as they happen, so
+	// /rewind can undo this message and its effects.
+	if r.Checkpoints != nil {
+		r.Checkpoints.Begin(input, len(r.Agent.History()), len(r.rawInputs))
+	}
 	_, err = r.Agent.RunMessage(ctx, msg)
 	// The raw input (not the hook-augmented form) is what the user typed, so
 	// that is what the session records for replay.
@@ -360,6 +372,17 @@ func (r *Repl) saveSession(rawInput string) {
 		}}
 	}
 	r.rawInputs = append(r.rawInputs, rawInput)
+	r.syncSession()
+}
+
+// syncSession writes the current agent history into the session file without
+// recording a new input. It is the shared persistence path for saveSession
+// (after a turn) and /rewind (after trimming history), so both agree on how
+// records align to raw inputs.
+func (r *Repl) syncSession() {
+	if r.Sessions == nil || r.current == nil {
+		return
+	}
 	r.current.Provider = r.Cfg.Provider
 	r.current.Model = r.Cfg.Model
 	r.current.Goal = r.goal

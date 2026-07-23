@@ -106,8 +106,23 @@ func (t *ReadFile) Execute(_ context.Context, input json.RawMessage) (string, er
 	return sb.String(), nil
 }
 
+// FileSnapshotter captures a file's pre-change contents so an edit can later
+// be undone (the /rewind checkpoint mechanism). The file tools depend only on
+// this small interface (DIP); a nil snapshotter disables it, leaving the tools
+// fully usable without the checkpoint layer.
+type FileSnapshotter interface {
+	// SnapshotFile records the current contents of an absolute path before it
+	// is modified.
+	SnapshotFile(path string)
+}
+
 // WriteFile creates or overwrites a file, creating parent directories.
-type WriteFile struct{ WorkDir string }
+type WriteFile struct {
+	WorkDir string
+	// Snapshot, when set, is asked to capture the file's prior state before
+	// each write so /rewind can restore it.
+	Snapshot FileSnapshotter
+}
 
 func (t *WriteFile) Name() string { return "write_file" }
 
@@ -138,6 +153,11 @@ func (t *WriteFile) Execute(_ context.Context, input json.RawMessage) (string, e
 	if err != nil {
 		return "", err
 	}
+	// Capture the prior state before touching the file, so /rewind can undo
+	// this write (including creation of a new file).
+	if t.Snapshot != nil {
+		t.Snapshot.SnapshotFile(path)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
@@ -159,7 +179,12 @@ func (t *WriteFile) Execute(_ context.Context, input json.RawMessage) (string, e
 // and tolerates whitespace/indentation differences (via internal/editmatch),
 // so an edit no longer fails on a stray space or a differing indent — while
 // still refusing ambiguous matches so a change never lands in the wrong place.
-type EditFile struct{ WorkDir string }
+type EditFile struct {
+	WorkDir string
+	// Snapshot, when set, captures the file's prior state before the edit so
+	// /rewind can restore it.
+	Snapshot FileSnapshotter
+}
 
 func (t *EditFile) Name() string { return "edit_file" }
 
@@ -207,6 +232,10 @@ func (t *EditFile) Execute(_ context.Context, input json.RawMessage) (string, er
 		return "", err
 	}
 	content := string(data)
+	// Snapshot the original before the edit lands, so /rewind can restore it.
+	if t.Snapshot != nil {
+		t.Snapshot.SnapshotFile(path)
+	}
 
 	res, err := editmatch.Replace(content, args.OldString, args.NewString, args.ReplaceAll)
 	if err != nil {

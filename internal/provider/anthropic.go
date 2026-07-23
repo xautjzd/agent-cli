@@ -70,7 +70,15 @@ func NewAnthropic(name string, cfg Config) (Provider, error) {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
 	}
 	client := anthropic.NewClient(opts...)
-	return &anthropicProvider{name: name, client: &client, thinking: cfg.Thinking}, nil
+	return &anthropicProvider{
+		name:     name,
+		client:   &client,
+		thinking: cfg.Thinking,
+		// Prompt caching is on unless explicitly disabled, so real Anthropic
+		// requests cache by default while a compatible gateway that rejects
+		// the cache_control field can opt out.
+		cache: !strings.EqualFold(cfg.PromptCache, "off"),
+	}, nil
 }
 
 // anthropicProvider implements Provider and Streamer over the official
@@ -84,6 +92,9 @@ type anthropicProvider struct {
 	// anything else uses adaptive thinking with summarized display so the
 	// reasoning surfaces through the normal thinking UI.
 	thinking string
+	// cache enables prompt-cache breakpoints (cache_control) on the stable
+	// request prefix — tools, the system prompt and recent turns.
+	cache bool
 }
 
 func (p *anthropicProvider) Name() string { return p.name }
@@ -190,7 +201,54 @@ func (p *anthropicProvider) buildParams(req Request, defaultMaxTokens int) (*ant
 		}
 		params.Tools = append(params.Tools, tool)
 	}
+	if p.cache {
+		applyCacheControl(params)
+	}
 	return params, nil
+}
+
+// applyCacheControl marks the stable prefix of a request with cache_control
+// breakpoints so Anthropic serves it from its prompt cache on later turns.
+//
+// A breakpoint caches every block before and including it, and the API allows
+// at most four. They are placed, in prefix order, on:
+//
+//   - the last tool definition — caches the whole (stable) tool block;
+//   - the last system-prompt block — caches tools + the large system prompt,
+//     which is the dominant and guaranteed cross-turn hit;
+//   - the last block of each of the two most recent messages — extends the
+//     cached prefix over the growing conversation so each new turn re-reads
+//     the previous one instead of reprocessing it.
+func applyCacheControl(params *anthropic.MessageNewParams) {
+	// The TTL is set explicitly to the default 5 minutes: an empty
+	// CacheControlEphemeralParam is treated as a zero value and dropped by
+	// the SDK's `omitzero` marshaling, so it must carry a field to appear on
+	// the wire.
+	ephemeral := anthropic.CacheControlEphemeralParam{TTL: anthropic.CacheControlEphemeralTTLTTL5m}
+
+	if n := len(params.Tools); n > 0 {
+		if cc := params.Tools[n-1].GetCacheControl(); cc != nil {
+			*cc = ephemeral
+		}
+	}
+	if n := len(params.System); n > 0 {
+		params.System[n-1].CacheControl = ephemeral
+	}
+
+	// The two most recent messages that carry at least one block. Walking
+	// from the end keeps the earlier of the two roughly where the previous
+	// turn's write landed, turning it into a read on the next request.
+	marked := 0
+	for i := len(params.Messages) - 1; i >= 0 && marked < 2; i-- {
+		blocks := params.Messages[i].Content
+		if len(blocks) == 0 {
+			continue
+		}
+		if cc := blocks[len(blocks)-1].GetCacheControl(); cc != nil {
+			*cc = ephemeral
+			marked++
+		}
+	}
 }
 
 // toAnthropicTool converts one tool definition. The internal schema is raw
@@ -444,13 +502,24 @@ func fromAnthropicMessage(msg *anthropic.Message) (*Response, error) {
 		}
 	}
 
+	// Anthropic reports input_tokens as the uncached portion only, keeping
+	// cache reads and writes in separate fields. Fold them back so
+	// PromptTokens is the full input context (as the other providers report
+	// it) and the cache breakdown stays available on the side.
+	inputTokens := int(msg.Usage.InputTokens + msg.Usage.CacheReadInputTokens + msg.Usage.CacheCreationInputTokens)
+	outputTokens := int(msg.Usage.OutputTokens)
+
 	return &Response{
 		Message:      out,
 		FinishReason: string(msg.StopReason),
 		Usage: Usage{
-			PromptTokens:     int(msg.Usage.InputTokens),
-			CompletionTokens: int(msg.Usage.OutputTokens),
-			TotalTokens:      int(msg.Usage.InputTokens + msg.Usage.OutputTokens),
+			PromptTokens:     inputTokens,
+			CompletionTokens: outputTokens,
+			TotalTokens:      inputTokens + outputTokens,
+			// Reads are billed at a discount and writes at a premium; both
+			// are a subset of PromptTokens.
+			CacheCreationTokens: int(msg.Usage.CacheCreationInputTokens),
+			CacheReadTokens:     int(msg.Usage.CacheReadInputTokens),
 		},
 	}, nil
 }

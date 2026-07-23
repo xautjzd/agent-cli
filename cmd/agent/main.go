@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/xautjzd/agent-cli/internal/agent"
+	"github.com/xautjzd/agent-cli/internal/checkpoint"
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/hook"
@@ -310,12 +311,17 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	// both for the main registry and to give each subagent its own isolated
 	// tools — it deliberately excludes the "task" tool so a subagent cannot
 	// spawn further subagents (bounding delegation depth to one).
+	// Checkpoints capture the working tree before each turn's file edits so
+	// /rewind can undo them. The same manager is shared with subagents (their
+	// tools are built by this closure too), so delegated edits are undoable as
+	// well.
+	checkpoints := checkpoint.NewManager()
 	buildBaseTools := func() []tool.Tool {
 		return []tool.Tool{
 			&tool.Bash{WorkDir: workDir, Sandbox: sbox, DenyNetwork: cfg.SandboxDenyNetwork},
 			&tool.ReadFile{WorkDir: workDir},
-			&tool.WriteFile{WorkDir: workDir},
-			&tool.EditFile{WorkDir: workDir},
+			&tool.WriteFile{WorkDir: workDir, Snapshot: checkpoints},
+			&tool.EditFile{WorkDir: workDir, Snapshot: checkpoints},
 			&tool.Glob{WorkDir: workDir},
 			&tool.Grep{WorkDir: workDir},
 			&tool.ListDir{WorkDir: workDir},
@@ -398,6 +404,7 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 		SandboxActive: sbox.Available(),
 		Hooks:         buildHooks(cfg),
 		Sessions:      session.NewProjectStore(workDir),
+		Checkpoints:   checkpoints,
 		WorkDir:       workDir,
 		In:            os.Stdin,
 		Out:           os.Stdout,

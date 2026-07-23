@@ -101,6 +101,15 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// CacheCreationTokens counts prompt tokens written to the provider's
+	// prefix cache on this request (billed at a write premium). Anthropic
+	// reports it as cache_creation_input_tokens; providers without prompt
+	// caching leave it zero.
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
+	// CacheReadTokens counts prompt tokens served from the prefix cache on
+	// this request (billed at a large discount). Anthropic reports it as
+	// cache_read_input_tokens. It is a subset of PromptTokens.
+	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
 }
 
 // Response is the assistant's reply to a Request. When ToolCalls is
