@@ -399,6 +399,19 @@ func TestProviderAndModelArgumentCompletion(t *testing.T) {
 		}
 	}
 
+	// "/mode " offers the permission modes, matching /model's behavior.
+	cands = r.completionsFor("/mode ", 6)
+	if len(cands) != 2 {
+		t.Fatalf("mode suggestions = %+v, want hitl and bypass", cands)
+	}
+	if cands[0].text != "bypass" || cands[1].text != "hitl" {
+		t.Errorf("mode suggestions = %+v, want bypass then hitl (sorted)", cands)
+	}
+	cands = r.completionsFor("/mode by", 8)
+	if len(cands) != 1 || cands[0].text != "bypass" {
+		t.Errorf("/mode by = %+v, want bypass only", cands)
+	}
+
 	// A bare command with no argument yet still completes command names,
 	// not arguments.
 	if cands := r.completionsFor("/provi", 6); len(cands) == 0 || cands[0].text != "/provider" {

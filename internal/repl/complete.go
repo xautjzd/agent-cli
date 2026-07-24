@@ -209,6 +209,11 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 			th, _ := theme.Get(n)
 			options = append(options, [2]string{n, th.Description})
 		}
+	case "mode":
+		options = append(options,
+			[2]string{"hitl", "dangerous operations require confirmation (default)"},
+			[2]string{"bypass", "no confirmations; dangerous operations are audit-logged"},
+		)
 	default:
 		return nil
 	}
