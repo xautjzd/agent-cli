@@ -151,6 +151,18 @@ func build(d definition) Theme {
 	if profile == termenv.Ascii {
 		reset = ""
 	}
+	// The faint attribute (SGR 2) is only a fallback for themes with no muted
+	// color of their own (monochrome): there it is the sole cue distinguishing
+	// secondary text. When a muted color exists, the color already carries the
+	// dimming, and stacking faint on top renders hints and labels nearly
+	// invisible — so we drop it and let the color do the work, matching how
+	// mainstream agents keep dim text legible. Thinking stays italic regardless.
+	mutedAttrs := []string{}
+	thinkingAttrs := []string{"3"}
+	if d.pal.Muted == "" {
+		mutedAttrs = []string{"2"}
+		thinkingAttrs = []string{"2", "3"}
+	}
 	return Theme{
 		Name:        d.name,
 		Description: d.desc,
@@ -160,8 +172,8 @@ func build(d definition) Theme {
 		Success:     seq(d.pal.Success),
 		Error:       seq(d.pal.Error),
 		Warning:     seq(d.pal.Warning),
-		Muted:       seq(d.pal.Muted, "2"),
-		Thinking:    seq(d.pal.Muted, "2", "3"),
+		Muted:       seq(d.pal.Muted, mutedAttrs...),
+		Thinking:    seq(d.pal.Muted, thinkingAttrs...),
 		Text:        seq(d.pal.Text),
 	}
 }

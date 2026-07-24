@@ -65,13 +65,17 @@ func TestTrueColorSequences(t *testing.T) {
 	if th.Reset != "\033[0m" {
 		t.Errorf("reset = %q", th.Reset)
 	}
-	// Muted carries the faint attribute (2) in front of the color.
-	if !strings.HasPrefix(th.Muted, "\033[2;") {
-		t.Errorf("muted = %q, want faint prefix", th.Muted)
+	// A colored theme's muted role is the color alone: the faint attribute (2)
+	// is dropped so dim text stays legible (the color carries the dimming).
+	if !strings.HasPrefix(th.Muted, "\033[38;2;") {
+		t.Errorf("muted = %q, want truecolor foreground with no leading attribute", th.Muted)
 	}
-	// Thinking is faint + italic + color.
-	if !strings.HasPrefix(th.Thinking, "\033[2;3;") {
-		t.Errorf("thinking = %q, want faint+italic prefix", th.Thinking)
+	if strings.HasPrefix(th.Muted, "\033[2;") {
+		t.Errorf("muted = %q, should not stack the faint attribute over a color", th.Muted)
+	}
+	// Thinking is italic + color (no faint); italic marks chain-of-thought.
+	if !strings.HasPrefix(th.Thinking, "\033[3;") {
+		t.Errorf("thinking = %q, want italic prefix", th.Thinking)
 	}
 }
 
