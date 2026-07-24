@@ -149,6 +149,20 @@ func TestCompletionsForFiles(t *testing.T) {
 	if cands := r.completionsFor("plain text", 5); cands != nil {
 		t.Errorf("unexpected candidates: %+v", cands)
 	}
+
+	// "@" glued to CJK text with no leading space still completes — the common
+	// case for Chinese prompts like "看一下@main".
+	r.fileCache = nil
+	value := "看一下@ma"
+	if cands := r.completionsFor(value, len(value)); len(cands) == 0 || cands[0].text != "@main.go" {
+		t.Errorf("CJK-glued @ candidates = %+v", cands)
+	}
+
+	// An email address is not a file reference: the "@" follows a word byte.
+	r.fileCache = nil
+	if cands := r.completionsFor("mail user@ma", 12); cands != nil {
+		t.Errorf("email should not complete as a file ref: %+v", cands)
+	}
 }
 
 func TestAcceptCandidate(t *testing.T) {
@@ -161,6 +175,34 @@ func TestAcceptCandidate(t *testing.T) {
 	value, pos = acceptCandidate("explain @ma please", 11, candidate{text: "@main.go"})
 	if value != "explain @main.go please" || pos != 16 {
 		t.Errorf("accept = %q pos=%d", value, pos)
+	}
+
+	// "@" glued to CJK text replaces only the ref, not the preceding words.
+	src := "看一下@ma"
+	value, _ = acceptCandidate(src, len(src), candidate{text: "@main.go"})
+	if value != "看一下@main.go " {
+		t.Errorf("CJK accept = %q", value)
+	}
+}
+
+// TestEditorFileCompletionAfterCJK reproduces the reported bug: typing "@"
+// after a line that begins with CJK text must still open the file popup. The
+// editor drives completion off input.Position(), which is a rune index, so this
+// guards the rune→byte conversion the token helpers depend on.
+func TestEditorFileCompletionAfterCJK(t *testing.T) {
+	r, _, _ := newTestRepl(t, "")
+	os.WriteFile(filepath.Join(r.WorkDir, "main.go"), []byte("x"), 0o644)
+
+	m := newEditorModel(r, "> ")
+	typeText(m, "看一下@ma")
+	if len(m.cands) == 0 || m.cands[0].text != "@main.go" {
+		t.Fatalf("no @ popup after CJK prefix: %+v", m.cands)
+	}
+
+	// Accepting inserts the path without corrupting the leading CJK text.
+	key(m, tea.KeyEnter)
+	if got := m.input.Value(); got != "看一下@main.go " {
+		t.Fatalf("accept after CJK = %q", got)
 	}
 }
 

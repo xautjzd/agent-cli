@@ -12,10 +12,12 @@ import (
 	"strings"
 )
 
-// fileRefRe matches @path tokens. The path may not contain whitespace or a
-// second '@'; trailing sentence punctuation is trimmed afterwards so
-// "@main.go," references main.go.
-var fileRefRe = regexp.MustCompile(`(^|\s)@([^\s@]+)`)
+// fileRefRe matches @path tokens. The '@' must begin the line or follow a
+// non-word rune (\w is ASCII here), so CJK prompts like "看一下@main.go" — which
+// carry no space before '@' — resolve, while an email's "user@host" does not.
+// The path may not contain whitespace or a second '@'; trailing sentence
+// punctuation is trimmed afterwards so "@main.go," references main.go.
+var fileRefRe = regexp.MustCompile(`(^|[^\w@])@([^\s@]+)`)
 
 // maxRefBytes caps how much of one referenced file is inlined, protecting
 // the context window from an accidental "@huge.log".

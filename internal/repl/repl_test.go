@@ -107,6 +107,16 @@ func TestExpandFileRefs(t *testing.T) {
 	if err == nil && strings.Contains(out, "Referenced") {
 		t.Errorf("email wrongly expanded:\n%s", out)
 	}
+
+	// A ref glued to CJK text with no space still resolves — Chinese prompts
+	// rarely put a space before "@".
+	out, err = ExpandFileRefs("看一下@a.txt", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "--- Referenced file: a.txt ---") || !strings.Contains(out, "alpha content") {
+		t.Errorf("CJK-glued ref failed:\n%s", out)
+	}
 }
 
 // newTestRepl builds a Repl over a stub provider and temp skill/memory dirs.

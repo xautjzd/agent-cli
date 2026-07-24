@@ -34,6 +34,38 @@ var completionSkipDirs = map[string]bool{
 	".idea": true, ".vscode": true, "dist": true, "build": true,
 }
 
+// runePosToByte converts a rune index — bubbles' textinput stores its value as
+// []rune and reports the cursor as a rune offset — into a byte offset into
+// value. The token helpers below index bytes, so every cursor position that
+// enters them must pass through here first; otherwise a line beginning with a
+// multi-byte rune (e.g. CJK text before "@") misaligns the whole scan.
+func runePosToByte(value string, runePos int) int {
+	if runePos <= 0 {
+		return 0
+	}
+	n := 0
+	for i := range value { // ranges by rune; i is the rune's byte offset
+		if n == runePos {
+			return i
+		}
+		n++
+	}
+	return len(value)
+}
+
+// bytePosToRune is the inverse of runePosToByte: it maps a byte offset back to
+// a rune index so a new cursor position can be handed to textinput.SetCursor.
+func bytePosToRune(value string, bytePos int) int {
+	n := 0
+	for i := range value {
+		if i >= bytePos {
+			return n
+		}
+		n++
+	}
+	return n
+}
+
 // tokenBounds returns the [start, end) byte range of the whitespace-delimited
 // token containing the cursor. With the cursor on a space, the token to its
 // left is chosen so completion keeps working right after typing a token.
@@ -55,17 +87,18 @@ func tokenBounds(value string, pos int) (int, int) {
 // completionsFor computes popup candidates for the text before the cursor.
 //
 // Key flow: only the token under the cursor matters. A leading-"/" token at
-// the start of the line completes commands and skills; a token starting with
-// "@" completes project file paths. Everything else yields no popup.
+// the start of the line completes commands and skills; an "@" reference under
+// the cursor completes project file paths. Everything else yields no popup.
 func (r *Repl) completionsFor(value string, pos int) []candidate {
+	pos = runePosToByte(value, pos)
 	start, _ := tokenBounds(value, pos)
-	tok := value[start:pos]
-
-	switch {
-	case start == 0 && strings.HasPrefix(tok, "/"):
-		return r.commandCandidates(tok[1:])
-	case strings.HasPrefix(tok, "@"):
-		return r.fileCandidates(tok[1:])
+	if start == 0 && strings.HasPrefix(value[start:pos], "/") {
+		return r.commandCandidates(value[start+1 : pos])
+	}
+	// "@" may sit mid-token — CJK prompts like "看一下@main" carry no space
+	// before it — so refBounds, not the whitespace token, locates the ref.
+	if at, _, ok := refBounds(value, pos); ok {
+		return r.fileCandidates(value[at+1 : pos])
 	}
 	// Argument position: some commands know their own valid arguments, so
 	// "/provider gl<tab>" and "/model cla<tab>" complete too.
@@ -73,6 +106,53 @@ func (r *Repl) completionsFor(value string, pos int) []candidate {
 		return cands
 	}
 	return nil
+}
+
+// isRefWordByte reports whether b is an ASCII word byte, matching \w in
+// fileRefRe. An "@" preceded by such a byte (e.g. "user@host") is not a
+// reference; one preceded by whitespace, punctuation, or a CJK rune's bytes is.
+func isRefWordByte(b byte) bool {
+	return b == '_' ||
+		(b >= '0' && b <= '9') ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z')
+}
+
+// refBounds locates the @-file-reference the cursor sits in. It returns the
+// byte range [at, end) spanning "@" through the end of the ref body and whether
+// one was found. Unlike tokenBounds it does not require whitespace before "@",
+// mirroring fileRefRe: "@" must begin the line or follow a non-word rune, and
+// the body holds no whitespace or second "@".
+func refBounds(value string, pos int) (at, end int, ok bool) {
+	if pos > len(value) {
+		pos = len(value)
+	}
+	// Walk back over the ref body to its "@".
+	at = pos
+	for at > 0 {
+		c := value[at-1]
+		if c == ' ' || c == '\t' || c == '@' {
+			break
+		}
+		at--
+	}
+	if at == 0 || value[at-1] != '@' {
+		return 0, 0, false
+	}
+	at--
+	if at > 0 && isRefWordByte(value[at-1]) {
+		return 0, 0, false
+	}
+	// Extend forward to the end of the ref body.
+	end = pos
+	for end < len(value) {
+		c := value[end]
+		if c == ' ' || c == '\t' || c == '@' {
+			break
+		}
+		end++
+	}
+	return at, end, true
 }
 
 // argumentCandidates completes the argument of a slash command whose
@@ -257,11 +337,20 @@ func listProjectFiles(workDir string) []string {
 // candidate text plus a trailing space, returning the new value and cursor
 // position.
 func acceptCandidate(value string, pos int, c candidate) (string, int) {
+	pos = runePosToByte(value, pos)
 	start, end := tokenBounds(value, pos)
+	// An "@" reference may start mid-token, so replace only from its "@"
+	// rather than clobbering any CJK text glued to the left of it.
+	if strings.HasPrefix(c.text, "@") {
+		if at, refEnd, ok := refBounds(value, pos); ok {
+			start, end = at, refEnd
+		}
+	}
 	sep := " "
 	if end < len(value) && (value[end] == ' ' || value[end] == '\t') {
 		sep = "" // the following text already provides the separator
 	}
 	newValue := value[:start] + c.text + sep + value[end:]
-	return newValue, start + len(c.text) + len(sep)
+	// SetCursor expects a rune index, so map the new byte offset back.
+	return newValue, bytePosToRune(newValue, start+len(c.text)+len(sep))
 }

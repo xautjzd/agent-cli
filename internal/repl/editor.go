@@ -2,6 +2,7 @@ package repl
 
 import (
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -243,8 +244,9 @@ func (m *editorModel) selected() (candidate, bool) {
 // wouldChange reports whether accepting c would alter the current token —
 // the test that lets Enter double as "select from menu" and "submit".
 func (m *editorModel) wouldChange(c candidate) bool {
-	start, end := tokenBounds(m.input.Value(), m.input.Position())
-	return m.input.Value()[start:end] != c.text
+	v := m.input.Value()
+	start, end := tokenBounds(v, runePosToByte(v, m.input.Position()))
+	return v[start:end] != c.text
 }
 
 // pasteImage grabs an image from the system clipboard, stores it out of
@@ -265,8 +267,9 @@ func (m *editorModel) pasteImage() {
 	n := m.repl.addPastedImage(path)
 	token := fmt.Sprintf("[Image #%d] ", n)
 	v, pos := m.input.Value(), m.input.Position()
-	m.input.SetValue(v[:pos] + token + v[pos:])
-	m.input.SetCursor(pos + len(token))
+	bp := runePosToByte(v, pos)
+	m.input.SetValue(v[:bp] + token + v[bp:])
+	m.input.SetCursor(pos + utf8.RuneCountInString(token))
 	m.status = fmt.Sprintf("📎 image #%d attached", n)
 }
 

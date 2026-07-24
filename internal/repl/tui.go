@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -745,8 +746,9 @@ func (m *tuiModel) selectedCand() (candidate, bool) {
 }
 
 func (m *tuiModel) wouldChange(c candidate) bool {
-	start, end := tokenBounds(m.input.Value(), m.input.Position())
-	return m.input.Value()[start:end] != c.text
+	v := m.input.Value()
+	start, end := tokenBounds(v, runePosToByte(v, m.input.Position()))
+	return v[start:end] != c.text
 }
 
 func (m *tuiModel) acceptCand(c candidate) {
@@ -769,8 +771,9 @@ func (m *tuiModel) pasteImage() {
 	n := m.repl.addPastedImage(path)
 	token := fmt.Sprintf("[Image #%d] ", n)
 	v, pos := m.input.Value(), m.input.Position()
-	m.input.SetValue(v[:pos] + token + v[pos:])
-	m.input.SetCursor(pos + len(token))
+	bp := runePosToByte(v, pos)
+	m.input.SetValue(v[:bp] + token + v[bp:])
+	m.input.SetCursor(pos + utf8.RuneCountInString(token))
 }
 
 // --- layout & rendering -----------------------------------------------------
