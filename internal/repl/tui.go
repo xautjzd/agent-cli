@@ -131,11 +131,20 @@ type tuiModel struct {
 
 	// ask is set while a mid-turn text prompt (permission) is awaiting the
 	// user's answer; pick is set while an arrow-navigable selection overlay
-	// (/resume, /config) is open. At most one is active at a time.
-	ask  *askMsg
-	pick *pickState
+	// (/resume, /config) is open; stats is set while the /stats overview is
+	// open. At most one is active at a time.
+	ask   *askMsg
+	pick  *pickState
+	stats *statsState
 
 	quitting bool
+}
+
+// statsMsg opens the /stats overview overlay, delivering a signal back on reply
+// when the user closes it so the command goroutine can resume.
+type statsMsg struct {
+	data  statsData
+	reply chan struct{}
 }
 
 // tui styles.
@@ -197,6 +206,7 @@ func (r *Repl) runTUI(ctx context.Context) error {
 	r.tuiAskSecret = m.requestSecret
 	r.tuiSelect = m.requestSelect
 	r.tuiSelectPreview = m.requestSelectPreview
+	r.tuiStats = m.requestStats
 	r.useTUI = false // in-model overlays replace the old nested-program pickers
 	defer func() {
 		r.Out = realOut
@@ -206,6 +216,7 @@ func (r *Repl) runTUI(ctx context.Context) error {
 		r.tuiAskSecret = nil
 		r.tuiSelect = nil
 		r.tuiSelectPreview = nil
+		r.tuiStats = nil
 	}()
 
 	_, err := p.Run()
@@ -245,6 +256,14 @@ func (m *tuiModel) requestSelectPreview(title string, items []pickerItem, previe
 	return rp.idx, rp.ok
 }
 
+// requestStats opens the /stats overview overlay and blocks the calling (turn)
+// goroutine until the user closes it.
+func (m *tuiModel) requestStats(data statsData) {
+	reply := make(chan struct{}, 1)
+	m.program.Send(statsMsg{data: data, reply: reply})
+	<-reply
+}
+
 func (m *tuiModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -281,6 +300,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pickRefilter() // also previews the initially highlighted item
 		return m, nil
 
+	case statsMsg:
+		// The stats overview takes over the screen until closed.
+		m.stats = newStatsState(msg.data, msg.reply)
+		return m, nil
+
 	case turnDoneMsg:
 		m.busy = false
 		m.turnCancel = nil
@@ -309,6 +333,11 @@ func (m *tuiModel) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// A selection overlay captures all keys (including its own arrow nav).
 	if m.pick != nil {
 		return m.handlePickKey(key)
+	}
+
+	// The stats overview captures all keys until closed.
+	if m.stats != nil {
+		return m.handleStatsKey(key)
 	}
 
 	// Scrolling works in every other mode.
@@ -758,6 +787,10 @@ func (m *tuiModel) View() string {
 	}
 	if !m.ready {
 		return "starting…"
+	}
+	// The stats overview replaces the transcript view while it is open.
+	if m.stats != nil {
+		return m.stats.view(m.w)
 	}
 	return m.vp.View() + "\n" + m.footer()
 }

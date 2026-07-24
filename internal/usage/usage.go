@@ -237,6 +237,27 @@ type storeFile struct {
 	Entries []Entry `json:"entries"`
 }
 
+// SumTokens totals input+output tokens across the given usage.json files
+// (typically every project's, for the all-time stats view). Missing or corrupt
+// files contribute nothing rather than failing the sum.
+func SumTokens(paths []string) int {
+	var total int
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var sf storeFile
+		if json.Unmarshal(data, &sf) != nil {
+			continue
+		}
+		for _, e := range sf.Entries {
+			total += e.Input + e.Output
+		}
+	}
+	return total
+}
+
 func (r *Recorder) load() {
 	if r.path == "" {
 		return

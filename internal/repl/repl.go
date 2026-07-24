@@ -94,6 +94,9 @@ type Repl struct {
 	// tuiSelectPreview is tuiSelect with a live-preview callback fired as the
 	// highlight moves (used by /theme to recolor the UI as you scroll).
 	tuiSelectPreview func(title string, items []pickerItem, preview func(int)) (int, bool)
+	// tuiStats, when set, opens the interactive stats overview inside the
+	// running program and blocks until the user closes it (used by /stats).
+	tuiStats func(data statsData)
 
 	// Policy decides approval for tool calls (rules + risk classifier); nil
 	// lazily builds a default. Audit records every gated decision as
@@ -192,6 +195,7 @@ func init() {
 		{"plan", "/plan [task|off]", "Plan mode: explore read-only, propose a plan, implement on approval", (*Repl).cmdPlan},
 		{"mode", "/mode [hitl|bypass]", "Show or switch the permission mode for dangerous operations", (*Repl).cmdMode},
 		{"usage", "/usage", "Show token usage, timing, and context occupancy", (*Repl).cmdUsage},
+		{"stats", "/stats", "Activity overview: heatmap, streaks, sessions, favorite model", (*Repl).cmdStats},
 		{"rename", "/rename [title]", "Rename the current session", (*Repl).cmdRename},
 		{"new", "/new", "Start a new session (current one stays resumable)", (*Repl).cmdNew},
 		{"resume", "/resume [id]", "Resume a previous session in this project", (*Repl).cmdResume},
