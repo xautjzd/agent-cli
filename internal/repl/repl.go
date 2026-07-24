@@ -1007,6 +1007,10 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 			}
 		}
 	}
+	// Re-render so the banner's provider/model reflect the switch immediately.
+	// This resets the scrollback, so it must run before the confirmation line
+	// below (which would otherwise be wiped).
+	r.redrawTranscript()
 	fmt.Fprintf(r.Out, "Switched to provider=%s model=%s (history preserved, %s)\n", name, cfg.Model, saved)
 	r.stripImagesIfNeeded()
 	return nil
@@ -1361,6 +1365,9 @@ func (r *Repl) cmdNew(_ context.Context, _ string) error {
 	r.rawInputs = nil
 	r.pendingTitle = ""
 	r.goal = "" // goals are session-scoped
+	// Clear the on-screen transcript: the conversation is gone, so the
+	// scrollback is rebuilt down to a fresh banner before the confirmation.
+	r.redrawTranscript()
 	fmt.Fprintln(r.Out, "Started a new session. Use /resume to return to a previous one.")
 	return nil
 }
@@ -1373,6 +1380,8 @@ func (r *Repl) cmdClear(_ context.Context, _ string) error {
 	r.rawInputs = nil
 	r.pendingTitle = ""
 	r.goal = "" // goals are session-scoped
+	// Clear the on-screen transcript to match the cleared conversation.
+	r.redrawTranscript()
 	fmt.Fprintln(r.Out, "Conversation cleared (previous session remains available via /resume).")
 	return nil
 }

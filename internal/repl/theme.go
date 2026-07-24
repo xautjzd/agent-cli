@@ -75,9 +75,19 @@ func (r *Repl) switchTheme(name string) {
 	r.Cfg.Theme = name
 	applyThemeStyles()
 
-	if r.sb != nil {
-		r.sb.Reset()
-		r.printBanner(r.sb)
-		r.replayTranscript(r.buildRecords())
+	r.redrawTranscript()
+}
+
+// redrawTranscript rebuilds the full-screen scrollback from scratch — banner
+// then the current conversation — so header info (provider/model, theme) and a
+// cleared session are reflected immediately. The banner is seeded once at the
+// top of the scrollback, so an in-place update of the provider/model shown
+// there requires a full re-render. No-op outside the TUI.
+func (r *Repl) redrawTranscript() {
+	if r.sb == nil {
+		return
 	}
+	r.sb.Reset()
+	r.printBanner(r.sb)
+	r.replayTranscript(r.buildRecords())
 }
