@@ -18,6 +18,10 @@ type candidate struct {
 	text string
 	// desc is the dimmed explanation rendered next to the text.
 	desc string
+	// current marks the candidate that equals the setting's active value, so
+	// the popup opens with it highlighted (e.g. the running /effort level)
+	// instead of always landing on the first row.
+	current bool
 }
 
 // maxCandidates bounds how many candidates are collected. The popup shows a
@@ -180,7 +184,9 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 			return nil
 		}
 		query := strings.ToLower(value[start:pos])
-		return filterCandidates(r.modelOptions(name), query)
+		// Completing the second argument (a model): pre-select the running
+		// model when it appears in this provider's list.
+		return markCurrent(filterCandidates(r.modelOptions(name), query), r.Cfg.Model)
 	}
 
 	query := strings.ToLower(value[argStart:pos])
@@ -221,7 +227,42 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 		return nil
 	}
 
-	return filterCandidates(options, query)
+	return markCurrent(filterCandidates(options, query), r.currentArgValue(cmd))
+}
+
+// currentArgValue returns the active value a "/cmd <arg>" completion should
+// open highlighted, or "" when the command has no single current value. For
+// effort the stored value is normalized (empty → adaptive) so it matches a
+// listed level.
+func (r *Repl) currentArgValue(cmd string) string {
+	switch cmd {
+	case "effort":
+		e, _ := provider.ParseEffort(r.Cfg.Thinking)
+		return string(e)
+	case "provider":
+		return r.Cfg.Provider
+	case "model":
+		return r.Cfg.Model
+	case "theme":
+		return r.Cfg.Theme
+	case "mode":
+		return string(r.permMode())
+	}
+	return ""
+}
+
+// markCurrent flags the candidate whose text equals current so the popup can
+// open with it selected. A blank current or no match leaves the list unmarked.
+func markCurrent(cands []candidate, current string) []candidate {
+	if current == "" {
+		return cands
+	}
+	for i := range cands {
+		if cands[i].text == current {
+			cands[i].current = true
+		}
+	}
+	return cands
 }
 
 // modelOptions lists model suggestions for a provider: the configured profile's

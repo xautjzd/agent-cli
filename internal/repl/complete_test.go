@@ -117,6 +117,35 @@ func TestCompletionsForCommands(t *testing.T) {
 	}
 }
 
+// TestEffortArgCompletionMarksCurrent verifies the "/effort " argument popup
+// flags the active level as current and opens highlighting it, instead of
+// always landing on the first (alphabetical) row.
+func TestEffortArgCompletionMarksCurrent(t *testing.T) {
+	r, _, _ := newTestRepl(t, "")
+	r.Cfg.Thinking = "low"
+
+	cands := r.completionsFor("/effort ", len("/effort "))
+	if len(cands) == 0 {
+		t.Fatal("no effort candidates")
+	}
+	curIdx := -1
+	for i, c := range cands {
+		if c.current {
+			if c.text != "low" {
+				t.Fatalf("current flag on %q, want low", c.text)
+			}
+			curIdx = i
+		}
+	}
+	if curIdx < 0 {
+		t.Fatalf("no candidate marked current: %+v", cands)
+	}
+	// The popup pre-selects the marked candidate rather than index 0.
+	if got := defaultCandIdx(cands); got != curIdx {
+		t.Errorf("default selection = %d, want current index %d", got, curIdx)
+	}
+}
+
 func TestCompletionsForFiles(t *testing.T) {
 	r, _, _ := newTestRepl(t, "")
 	os.WriteFile(filepath.Join(r.WorkDir, "main.go"), []byte("x"), 0o644)

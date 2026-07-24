@@ -723,10 +723,22 @@ func (m *tuiModel) refreshCands() {
 		return
 	}
 	if m.sel < 0 || m.sel >= len(m.cands) || prevFirst != m.cands[0].text {
-		m.sel = 0
+		// Open on the candidate that matches the active setting (e.g. the
+		// running /effort level) when one is marked, otherwise the first row.
+		m.sel = defaultCandIdx(m.cands)
 		m.offset = 0
 	}
 	m.scrollCands()
+}
+
+// defaultCandIdx returns the index of the candidate flagged as current, or 0.
+func defaultCandIdx(cands []candidate) int {
+	for i, c := range cands {
+		if c.current {
+			return i
+		}
+	}
+	return 0
 }
 
 func (m *tuiModel) scrollCands() {
@@ -863,10 +875,14 @@ func (m *tuiModel) popupView() string {
 	}
 	for i := m.offset; i < end; i++ {
 		c := m.cands[i]
+		desc := c.desc
+		if c.current {
+			desc += " (current)"
+		}
 		padded := " " + truncPad(c.text, 28)
-		line := padded + " " + styleDesc.Render(c.desc)
+		line := padded + " " + styleDesc.Render(desc)
 		if i == m.sel {
-			line = styleSelected.Render(padded) + " " + styleDesc.Render(c.desc)
+			line = styleSelected.Render(padded) + " " + styleDesc.Render(desc)
 		}
 		b.WriteString(line)
 		if i < end-1 {
