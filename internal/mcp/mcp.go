@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/xautjzd/agent-cli/internal/version"
 )
 
 // protocolVersion is the MCP revision this client negotiates.
@@ -85,7 +87,7 @@ func (c *Client) initialize(ctx context.Context) error {
 		"capabilities":    map[string]any{},
 		"clientInfo": map[string]any{
 			"name":    "agent-cli",
-			"version": "0.1.0",
+			"version": version.Version,
 		},
 	}
 	if _, err := c.transport.call(ctx, "initialize", params); err != nil {

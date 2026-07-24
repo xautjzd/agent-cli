@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/xautjzd/agent-cli/internal/theme"
+	"github.com/xautjzd/agent-cli/internal/version"
 )
 
 // Full-screen interactive UI. Unlike the per-line inline editor (which the
@@ -153,12 +155,49 @@ var (
 	styleAsk     = lipgloss.NewStyle().Bold(true).Foreground(theme.Current().AccentColor()) // overlay title
 )
 
-// printBanner writes the startup banner (dimmed) to w. Shared by runTUI and
-// /theme re-render so the reprinted transcript keeps its header.
+// printBanner writes the startup banner to w: a boxed header showing the
+// version, active provider/model, and project path — the orientation info the
+// mainstream coding agents surface on launch. Shared by runTUI and /theme
+// re-render so the reprinted transcript keeps its header.
 func (r *Repl) printBanner(w io.Writer) {
 	th := theme.Current()
-	fmt.Fprintf(w, "%s\n", th.Paint(th.Muted, fmt.Sprintf("agent-cli — provider=%s model=%s", r.Cfg.Provider, r.Cfg.Model)))
+
+	// label renders "key   value" with a dimmed, fixed-width key so the values
+	// line up in a column.
+	label := func(k, v string) string {
+		return th.Paint(th.Muted, fmt.Sprintf("%-9s", k)) + v
+	}
+	rows := []string{
+		th.Paint(th.Accent, "✻ agent-cli") + th.Paint(th.Muted, "  v"+version.Version),
+		"",
+		label("provider", r.Cfg.Provider),
+		label("model", r.Cfg.Model),
+		label("cwd", abbrevHome(r.WorkDir)),
+	}
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(th.BorderColor()).
+		Padding(0, 2).
+		Render(strings.Join(rows, "\n"))
+
+	fmt.Fprintln(w, box)
 	fmt.Fprintf(w, "%s\n", th.Paint(th.Muted, "Type a task · \"@path\" to reference files · \"/\" for commands · /exit to quit"))
+}
+
+// abbrevHome shortens a path under the user's home directory to a leading "~",
+// matching how shells and other CLIs present the working directory.
+func abbrevHome(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	if p == home {
+		return "~"
+	}
+	if rel := strings.TrimPrefix(p, home+string(os.PathSeparator)); rel != p {
+		return "~" + string(os.PathSeparator) + rel
+	}
+	return p
 }
 
 // runTUI runs the full-screen interactive session. It swaps r.Out and the
@@ -270,9 +309,12 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+		// Mark ready before refreshing: refreshViewport early-returns while
+		// !ready, so on the first size message the seeded banner would
+		// otherwise not render until the next refresh (the user's first input).
+		m.ready = true
 		m.layout()
 		m.refreshViewport()
-		m.ready = true
 		return m, nil
 
 	case refreshMsg:

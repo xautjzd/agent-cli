@@ -16,6 +16,7 @@ import (
 
 	"sort"
 
+	"github.com/atotto/clipboard"
 	"github.com/xautjzd/agent-cli/internal/agent"
 	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/checkpoint"
@@ -27,7 +28,6 @@ import (
 	"github.com/xautjzd/agent-cli/internal/mcp"
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/permission"
-	"github.com/atotto/clipboard"
 
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/session"
@@ -232,8 +232,7 @@ func (r *Repl) Run(ctx context.Context) error {
 
 // runPlain is the line-at-a-time loop used for non-terminal input.
 func (r *Repl) runPlain(ctx context.Context) error {
-	fmt.Fprintf(r.Out, "agent-cli — provider=%s model=%s\n", r.Cfg.Provider, r.Cfg.Model)
-	fmt.Fprintln(r.Out, `Type a task, "@path" to reference files, "/" for commands and skills, "/exit" to quit.`)
+	r.printBanner(r.Out)
 	for {
 		fmt.Fprintln(r.Out)
 		prompt := "> "

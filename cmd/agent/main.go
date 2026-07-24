@@ -44,6 +44,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/textwidth"
 	"github.com/xautjzd/agent-cli/internal/theme"
 	"github.com/xautjzd/agent-cli/internal/usage"
+	"github.com/xautjzd/agent-cli/internal/version"
 	"github.com/xautjzd/agent-cli/internal/webtool"
 
 	"github.com/xautjzd/agent-cli/internal/tool"
@@ -71,7 +72,7 @@ func run(args []string) error {
 		case "config":
 			return runConfig(args[1:])
 		case "version":
-			fmt.Println("agent-cli 0.1.0")
+			fmt.Println("agent-cli " + version.Version)
 			return nil
 		}
 	}
