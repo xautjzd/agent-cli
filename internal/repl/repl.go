@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1240,7 +1241,22 @@ func (r *Repl) cmdMemory(_ context.Context, _ string) error {
 func (r *Repl) cmdCopy(_ context.Context, _ string) error {
 	var content string
 	if r.sb != nil {
-		content = r.sb.String()
+		// The scrollback stores styled text (ANSI color/escape sequences); strip
+		// them so the clipboard gets clean, paste-able plain text.
+		content = stripANSI(r.sb.String())
+		// The scrollback opens with the startup banner (a fixed, deterministic
+		// block); re-render it to know its exact text and drop it — it's UI
+		// chrome, not part of the conversation.
+		var bb strings.Builder
+		r.printBanner(&bb)
+		content = strings.TrimPrefix(content, stripANSI(bb.String()))
+		// The very last thing in the scrollback is this /copy command's own echoed
+		// input line (submit echoes "❯ /copy" before the command runs, and its
+		// output is printed only after). Drop it so the copy excludes /copy itself.
+		if i := strings.LastIndex(content, "\n❯ "); i >= 0 {
+			content = content[:i]
+		}
+		content = strings.Trim(content, "\n")
 	} else {
 		// In plain mode there is no scrollback buffer; the output is
 		// already on the terminal and cannot be retrieved.
@@ -1260,6 +1276,16 @@ func (r *Repl) cmdCopy(_ context.Context, _ string) error {
 		lines, formatNumber(chars))
 	fmt.Fprintln(r.Out, "Tip: you can also hold Shift while selecting text with your mouse for native terminal selection (works in iTerm2, Kitty, WezTerm, Windows Terminal, etc.).")
 	return nil
+}
+
+// ansiRE matches ANSI escape sequences: CSI sequences (colors, cursor moves)
+// and OSC sequences (terminated by BEL or ST). Used to reduce the styled
+// transcript back to plain text before copying to the clipboard.
+var ansiRE = regexp.MustCompile("\x1b\\[[0-9;?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)")
+
+// stripANSI removes ANSI escape sequences from s.
+func stripANSI(s string) string {
+	return ansiRE.ReplaceAllString(s, "")
 }
 
 // formatNumber pretty-prints an integer with thousand separators.
