@@ -20,7 +20,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -657,11 +656,13 @@ func (e *terminalEvents) OnToolResult(name, result string, ok bool) {
 		}
 		return
 	}
-	// File edits report a unified diff; render it in full and colorized
-	// rather than collapsing it to a one-line preview.
-	if body := diffBody(lines); body != nil {
-		fmt.Fprintf(e.out, "  %s\n", th.Paint(th.Muted, "⎿ "+lines[0]))
-		e.renderDiff(body)
+	// File edits report a numbered unified diff; render it in full and
+	// colorized rather than collapsing it to a one-line preview.
+	if header, body, isDiff := mdstream.FileEditDiff(result); isDiff {
+		fmt.Fprintf(e.out, "  %s\n", th.Paint(th.Muted, "⎿ "+header))
+		for _, l := range strings.Split(mdstream.RenderFileEditDiff(header, body, maxDiffLines), "\n") {
+			fmt.Fprintf(e.out, "    %s\n", l)
+		}
 		return
 	}
 
@@ -675,52 +676,8 @@ func (e *terminalEvents) OnToolResult(name, result string, ok bool) {
 	fmt.Fprintf(e.out, "  %s\n", th.Paint(th.Muted, "⎿ "+preview))
 }
 
-// diffLineRe matches a rendered unified-diff line: right-aligned line number,
-// a space, then the ' ', '-' or '+' marker.
-var diffLineRe = regexp.MustCompile(`^\s*\d+ [ +-] `)
-
 // maxDiffLines bounds how much of a large diff is printed.
 const maxDiffLines = 40
-
-// diffBody returns the diff portion of a tool result, or nil when the result
-// is not a diff. A result qualifies when it has a summary header followed by
-// at least one numbered diff line.
-func diffBody(lines []string) []string {
-	if len(lines) < 2 {
-		return nil
-	}
-	for _, l := range lines[1:] {
-		if diffLineRe.MatchString(l) {
-			return lines[1:]
-		}
-	}
-	return nil
-}
-
-// renderDiff prints diff lines with additions in green, removals in red and
-// context dimmed, indented under the result marker.
-func (e *terminalEvents) renderDiff(body []string) {
-	th := theme.Current()
-	shown := body
-	if len(shown) > maxDiffLines {
-		shown = shown[:maxDiffLines]
-	}
-	for _, l := range shown {
-		color := th.Muted
-		if m := diffLineRe.FindString(l); m != "" {
-			switch m[len(m)-2] {
-			case '+':
-				color = th.Success
-			case '-':
-				color = th.Error
-			}
-		}
-		fmt.Fprintf(e.out, "    %s\n", th.Paint(color, l))
-	}
-	if n := len(body) - len(shown); n > 0 {
-		fmt.Fprintf(e.out, "    %s\n", th.Paint(th.Muted, fmt.Sprintf("… %d more diff line(s)", n)))
-	}
-}
 
 // OnTurnStats prints a dim one-line summary after each turn: elapsed time,
 // this turn's token split, the current context occupancy, and session

@@ -1,6 +1,7 @@
 package mdstream
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -164,6 +165,118 @@ func cleanDiffPath(p string) string {
 		return ""
 	}
 	return p
+}
+
+// numberedDiffLineRe matches a rendered file-edit diff line as produced by
+// diff.FileDiff.Unified: a right-aligned line number, a space, then the ' ',
+// '+' or '-' marker and a space. It is the signal that a file-tool result
+// carries a diff rather than a plain message.
+var numberedDiffLineRe = regexp.MustCompile(`^\s*\d+ [ +-] `)
+
+// numberedDiffParts splits a numbered diff line into its number column,
+// change marker, and code, so each can be styled independently.
+var numberedDiffParts = regexp.MustCompile(`^(\s*\d+) ([ +-]) (.*)$`)
+
+// editSummaryRe strips the trailing change summary ("(+3 -1)"/"(no changes)")
+// so the file path can be recovered from a file-edit header line.
+var editSummaryRe = regexp.MustCompile(`\s*\((?:\+\d+ -\d+|no changes)\)\s*$`)
+
+// FileEditDiff detects whether a file-tool result carries a numbered unified
+// diff. Such results have a summary header on the first line followed by at
+// least one numbered diff line. On a match it returns the header and the diff
+// body; otherwise ok is false and callers fall back to a plain preview.
+func FileEditDiff(result string) (header string, body []string, ok bool) {
+	lines := strings.Split(result, "\n")
+	if len(lines) < 2 {
+		return "", nil, false
+	}
+	for _, l := range lines[1:] {
+		if numberedDiffLineRe.MatchString(l) {
+			return lines[0], lines[1:], true
+		}
+	}
+	return "", nil, false
+}
+
+// RenderFileEditDiff colorizes a file-edit diff body for terminal display,
+// matching the GitHub-style rendering used for diff blocks in assistant text:
+// the code on each line is syntax-highlighted (language inferred from the path
+// in header), additions and removals carry a colored marker and a subtle line
+// background, and line numbers stay dimmed. It caps output at maxLines (<=0
+// means unbounded) and notes how many lines were dropped.
+func RenderFileEditDiff(header string, body []string, maxLines int) string {
+	th := theme.Current()
+	hl := highlighter("", editHeaderPath(header), strings.Join(diffCode(body), "\n"))
+	addBg, delBg := diffBackgrounds()
+
+	shown, truncated := body, 0
+	if maxLines > 0 && len(shown) > maxLines {
+		truncated, shown = len(shown)-maxLines, shown[:maxLines]
+	}
+
+	var sb strings.Builder
+	for i, l := range shown {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(renderNumberedDiffLine(th, hl, addBg, delBg, l))
+	}
+	if truncated > 0 {
+		if len(shown) > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(th.Paint(th.Muted, fmt.Sprintf("… %d more diff line(s)", truncated)))
+	}
+	return sb.String()
+}
+
+// renderNumberedDiffLine styles one numbered diff line. Lines that are not
+// numbered (hunk "..." separators) are dimmed as-is.
+func renderNumberedDiffLine(th theme.Theme, hl func(string) string, addBg, delBg, line string) string {
+	m := numberedDiffParts.FindStringSubmatch(line)
+	if m == nil {
+		return th.Paint(th.Muted, line)
+	}
+	num, marker, code := th.Paint(th.Muted, m[1]+" "), m[2], m[3]
+
+	// Without a highlighter, keep robust whole-line foreground coloring so the
+	// change signal survives on limited terminals.
+	if hl == nil {
+		return num + th.Paint(diffLineSeq(th, marker+" "), marker+" "+code)
+	}
+
+	switch marker {
+	case "+":
+		return num + changedLine(th, th.Success, addBg, "+", " "+hl(code))
+	case "-":
+		return num + changedLine(th, th.Error, delBg, "-", " "+hl(code))
+	default:
+		return num + "  " + hl(code) // context: highlighted, no marker recolor.
+	}
+}
+
+// diffCode returns just the code portion of each numbered diff line, used as a
+// sample for language detection when the path alone is inconclusive.
+func diffCode(body []string) []string {
+	out := make([]string, 0, len(body))
+	for _, l := range body {
+		if m := numberedDiffParts.FindStringSubmatch(l); m != nil {
+			out = append(out, m[3])
+		}
+	}
+	return out
+}
+
+// editHeaderPath recovers the changed file's path from a file-edit header line
+// (e.g. "Edited /path/file.go (+3 -1)"): the summary is stripped and the path
+// is the last remaining field, which holds whether or not the verb itself
+// contains spaces ("Edited (2 occurrences in) …").
+func editHeaderPath(header string) string {
+	fields := strings.Fields(editSummaryRe.ReplaceAllString(header, ""))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[len(fields)-1]
 }
 
 // diffBackgrounds returns the line-background SGR sequences for added and

@@ -149,6 +149,71 @@ func TestCodeBlockIsSyntaxHighlighted(t *testing.T) {
 	}
 }
 
+func TestFileEditDiffDetection(t *testing.T) {
+	if _, _, ok := FileEditDiff("Edited f (+1 -0)"); ok {
+		t.Error("a header alone is not a diff")
+	}
+	if _, _, ok := FileEditDiff("Wrote f\njust some text"); ok {
+		t.Error("plain multi-line output is not a diff")
+	}
+	if _, _, ok := FileEditDiff("    12\tpackage main"); ok {
+		t.Error("tab-separated read output is not a diff")
+	}
+	header, body, ok := FileEditDiff("Edited f.go (+1 -0)\n   11   ctx\n   12 + added")
+	if !ok {
+		t.Fatal("numbered diff not detected")
+	}
+	if header != "Edited f.go (+1 -0)" || len(body) != 2 {
+		t.Errorf("wrong split: header=%q body=%v", header, body)
+	}
+}
+
+func TestEditHeaderPath(t *testing.T) {
+	cases := map[string]string{
+		"Edited /a/b/theme.go (+3 -1)":                "/a/b/theme.go",
+		"Wrote /a/b/new.go (+9 -0)":                   "/a/b/new.go",
+		"Edited (2 occurrences in) /a/b/x.go (+2 -2)": "/a/b/x.go",
+		"Wrote /a/b/empty.go (no changes)":            "/a/b/empty.go",
+	}
+	for header, want := range cases {
+		if got := editHeaderPath(header); got != want {
+			t.Errorf("editHeaderPath(%q) = %q, want %q", header, got, want)
+		}
+	}
+}
+
+func TestRenderFileEditDiffColorsChanges(t *testing.T) {
+	withColor(t, termenv.ANSI) // 16-color: no backgrounds, marker carries the signal
+	theme.Set("dark")
+	th := theme.Current()
+	body := []string{"   11   context", "   12 - old", "   12 + new"}
+	got := RenderFileEditDiff("Edited f.go (+1 -1)", body, 40)
+
+	if !strings.Contains(got, th.Success) {
+		t.Errorf("addition marker not painted with success color: %q", got)
+	}
+	if !strings.Contains(got, th.Error) {
+		t.Errorf("removal marker not painted with error color: %q", got)
+	}
+	// Every body line is rendered, not collapsed.
+	if lines := strings.Count(got, "\n"); lines != len(body)-1 {
+		t.Errorf("expected %d rendered lines, got %d: %q", len(body), lines+1, got)
+	}
+}
+
+func TestRenderFileEditDiffTruncates(t *testing.T) {
+	withColor(t, termenv.ANSI)
+	theme.Set("dark")
+	body := make([]string, 5)
+	for i := range body {
+		body[i] = "   1 + line"
+	}
+	got := RenderFileEditDiff("Edited f.go (+5 -0)", body, 2)
+	if !strings.Contains(got, "3 more diff line(s)") {
+		t.Errorf("truncation note missing: %q", got)
+	}
+}
+
 func TestDiffContentIsSyntaxHighlighted(t *testing.T) {
 	withColor(t, termenv.TrueColor)
 	theme.Set("dark")

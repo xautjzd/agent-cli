@@ -69,17 +69,16 @@ func TestDiffDetectionAndColorization(t *testing.T) {
 	if strings.Contains(out, "(+3 lines)") {
 		t.Errorf("diff was collapsed to a preview:\n%q", out)
 	}
-	for _, want := range []string{"Edited code.go (+1 -1)", "old line", "new line"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in:\n%q", want, out)
-		}
+	if !strings.Contains(out, "Edited code.go (+1 -1)") {
+		t.Errorf("missing header in:\n%q", out)
 	}
-	// Removals render red, additions green.
-	if !strings.Contains(out, theme.Current().Error+"    2 - old line") {
-		t.Errorf("removal not red:\n%q", out)
+	// Removals render red, additions green (marker coloring survives even when
+	// the code itself is syntax-highlighted).
+	if !strings.Contains(out, theme.Current().Error) {
+		t.Errorf("removal not colored:\n%q", out)
 	}
-	if !strings.Contains(out, theme.Current().Success+"    2 + new line") {
-		t.Errorf("addition not green:\n%q", out)
+	if !strings.Contains(out, theme.Current().Success) {
+		t.Errorf("addition not colored:\n%q", out)
 	}
 
 	// Non-diff output keeps the compact one-line preview.
@@ -87,18 +86,6 @@ func TestDiffDetectionAndColorization(t *testing.T) {
 	e.OnToolResult("bash", "line one\nline two\nline three", true)
 	if !strings.Contains(buf.String(), "(+2 lines)") {
 		t.Errorf("non-diff result should stay collapsed:\n%q", buf.String())
-	}
-}
-
-func TestDiffBodyDetection(t *testing.T) {
-	if diffBody([]string{"Edited f (+1 -0)"}) != nil {
-		t.Error("a header alone is not a diff")
-	}
-	if diffBody([]string{"Wrote f", "just some text"}) != nil {
-		t.Error("plain multi-line output is not a diff")
-	}
-	if body := diffBody([]string{"Edited f (+1 -0)", "   12 + added"}); len(body) != 1 {
-		t.Errorf("numbered diff line not detected: %v", body)
 	}
 }
 

@@ -67,10 +67,24 @@ func (e *tuiEvents) OnToolResult(name, result string, ok bool) {
 		}
 		return
 	}
+	// File edits report a numbered unified diff; show it in full and colorized
+	// by default rather than collapsing it to a one-line preview.
+	if header, body, isDiff := mdstream.FileEditDiff(result); isDiff {
+		fmt.Fprintf(e.out, "  %s %s\n", th.Paint(marker, "⎿"), th.Paint(th.Muted, header))
+		for _, line := range strings.Split(mdstream.RenderFileEditDiff(header, body, editDiffMaxLines), "\n") {
+			fmt.Fprintf(e.out, "    %s\n", line)
+		}
+		return
+	}
+
 	// A short preview of the result under the call, dimmed.
 	preview := firstLine(result, 200)
 	fmt.Fprintf(e.out, "  %s %s\n", th.Paint(marker, "⎿"), th.Paint(th.Muted, preview))
 }
+
+// editDiffMaxLines bounds how much of a file-edit diff is printed under a tool
+// result before the remainder is summarized as a count.
+const editDiffMaxLines = 40
 
 func (e *tuiEvents) OnTurnStats(s agent.TurnStats) {
 	th := theme.Current()
