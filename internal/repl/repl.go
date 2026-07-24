@@ -27,6 +27,8 @@ import (
 	"github.com/xautjzd/agent-cli/internal/mcp"
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/permission"
+	"github.com/atotto/clipboard"
+
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/session"
 	"github.com/xautjzd/agent-cli/internal/skill"
@@ -195,6 +197,7 @@ func init() {
 		{"resume", "/resume [id]", "Resume a previous session in this project", (*Repl).cmdResume},
 		{"rewind", "/rewind", "Undo to a checkpoint: restore files and conversation to before an earlier message", (*Repl).cmdRewind},
 		{"compact", "/compact", "Summarize earlier turns to free up context now", (*Repl).cmdCompact},
+		{"copy", "/copy", "Copy the session transcript to the system clipboard", (*Repl).cmdCopy},
 		{"clear", "/clear", "Clear conversation history (keeps system prompt)", (*Repl).cmdClear},
 		{"exit", "/exit", "Quit the session", (*Repl).cmdExit},
 	}
@@ -1226,6 +1229,47 @@ func (r *Repl) cmdMemory(_ context.Context, _ string) error {
 		fmt.Fprintf(r.Out, "%-24s %s\n", e.Name, first)
 	}
 	return nil
+}
+
+// cmdCopy writes the current session transcript to the system clipboard.
+// In TUI mode it reads from the in-memory scrollback buffer; in plain mode
+// it copies whatever has been printed to the terminal so far (best-effort).
+func (r *Repl) cmdCopy(_ context.Context, _ string) error {
+	var content string
+	if r.sb != nil {
+		content = r.sb.String()
+	} else {
+		// In plain mode there is no scrollback buffer; the output is
+		// already on the terminal and cannot be retrieved.
+		fmt.Fprintln(r.Out, "Copy is only available in interactive (TUI) mode.")
+		return nil
+	}
+	if strings.TrimSpace(content) == "" {
+		fmt.Fprintln(r.Out, "Nothing to copy — the session transcript is empty.")
+		return nil
+	}
+	if err := clipboard.WriteAll(content); err != nil {
+		return fmt.Errorf("clipboard write failed: %w", err)
+	}
+	lines := strings.Count(content, "\n") + 1
+	chars := len(content)
+	fmt.Fprintf(r.Out, "Copied %d lines (%s characters) to clipboard.\n",
+		lines, formatNumber(chars))
+	fmt.Fprintln(r.Out, "Tip: you can also hold Shift while selecting text with your mouse for native terminal selection (works in iTerm2, Kitty, WezTerm, Windows Terminal, etc.).")
+	return nil
+}
+
+// formatNumber pretty-prints an integer with thousand separators.
+func formatNumber(n int) string {
+	s := strconv.Itoa(n)
+	var b strings.Builder
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
 }
 
 // cmdNew starts a fresh session: the conversation resets and the next turn

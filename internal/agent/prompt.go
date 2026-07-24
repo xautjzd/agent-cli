@@ -6,6 +6,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/skill"
+	"github.com/xautjzd/agent-cli/internal/tool"
 )
 
 // PromptBuilder assembles the system prompt from static instructions,
@@ -22,6 +23,11 @@ type PromptBuilder struct {
 	WorkDir string
 	Skills  skill.Repository
 	Memory  memory.Store
+	// Tools, when set, contributes the catalog of deferred (on-demand) tools —
+	// listed here by name+description only. Their full schemas are loaded at
+	// call time via search_tools, keeping this prompt small and cacheable even
+	// with many MCP tools connected.
+	Tools *tool.Registry
 }
 
 const basePrompt = `You are an autonomous coding agent operating in a terminal.
@@ -36,6 +42,15 @@ Rules:
 - Save durable, non-obvious project knowledge with the remember tool; keep memories short and factual.
 - For anything time-sensitive — "latest", "recent", "current", news, versions, prices — use the current date provided in context (not your training data), and the correct current year in web_search queries.
 - Be concise. Report what you did and what you verified.`
+
+// firstLine trims a tool description to its first line, keeping the deferred
+// catalog to one line per tool however verbose an MCP server's description is.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
+}
 
 // Build produces the full system prompt.
 //
@@ -66,6 +81,18 @@ func (b *PromptBuilder) Build() string {
 			sb.WriteString("\n## Available skills (load with use_skill when relevant)\n\n")
 			for _, s := range skills {
 				fmt.Fprintf(&sb, "- %s: %s\n", s.Name, s.Description)
+			}
+		}
+	}
+
+	if b.Tools != nil {
+		if deferred := b.Tools.Deferred(); len(deferred) > 0 {
+			sb.WriteString("\n## Deferred tools (load with search_tools before calling)\n\n")
+			sb.WriteString("These tools are available but not in your active tool list. " +
+				"To call one, first load its schema with search_tools (by exact name or query); " +
+				"it becomes callable on your next turn.\n\n")
+			for _, t := range deferred {
+				fmt.Fprintf(&sb, "- %s: %s\n", t.Name(), firstLine(t.Description()))
 			}
 		}
 	}

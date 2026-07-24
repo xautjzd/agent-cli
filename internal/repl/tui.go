@@ -712,7 +712,7 @@ func (m *tuiModel) footer() string {
 		b.WriteString(box.Render(styleWorking.Render("working… (Ctrl-C to interrupt)")))
 	default:
 		b.WriteString(box.Render(m.input.View()))
-		b.WriteString("\n" + styleHint.Render("  ↑↓ history/menu · tab accept · pgup/pgdn scroll · /exit"))
+		b.WriteString("\n" + styleHint.Render("  ↑↓ history/menu · tab accept · pgup/pgdn scroll · /copy · /exit"))
 	}
 	return b.String()
 }

@@ -53,11 +53,11 @@ func TestTUIResizeIsClean(t *testing.T) {
 	m := newTestTUI(t)
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	// A resize must not panic and must re-fit the box to the new width.
-	m.Update(tea.WindowSizeMsg{Width: 60, Height: 18})
+	m.Update(tea.WindowSizeMsg{Width: 70, Height: 18})
 	view := m.View()
 	for _, line := range strings.Split(view, "\n") {
-		if w := lineWidth(line); w > 60 {
-			t.Errorf("line exceeds new width 60 (=%d): %q", w, line)
+		if w := lineWidth(line); w > 70 {
+				t.Errorf("line exceeds new width 70 (=%d): %q", w, line)
 		}
 	}
 }

@@ -21,6 +21,30 @@ func TestSystemPromptHasNoDate(t *testing.T) {
 	}
 }
 
+// The deferred-tool catalog lists on-demand tools by name+description only, so
+// the model can discover MCP tools without their full schemas bloating the
+// prompt. The catalog appears only when deferred tools exist (byte-stable
+// otherwise) and never carries a schema.
+func TestSystemPromptDeferredCatalog(t *testing.T) {
+	// No deferred tools: the section must be absent.
+	reg := tool.NewRegistry()
+	if p := (&PromptBuilder{WorkDir: "/proj", Tools: reg}).Build(); strings.Contains(p, "Deferred tools") {
+		t.Errorf("no deferred section expected when nothing is deferred:\n%s", p)
+	}
+
+	reg.RegisterDeferred(namedTool{name: "mcp__db__query"})
+	p := (&PromptBuilder{WorkDir: "/proj", Tools: reg}).Build()
+	if !strings.Contains(p, "Deferred tools") || !strings.Contains(p, "search_tools") {
+		t.Errorf("deferred catalog missing:\n%s", p)
+	}
+	if !strings.Contains(p, "mcp__db__query") {
+		t.Errorf("deferred tool name missing from catalog:\n%s", p)
+	}
+	if strings.Contains(p, `"type":"object"`) {
+		t.Errorf("catalog must not embed tool schemas:\n%s", p)
+	}
+}
+
 // The date is injected as a separate note right AFTER the system prompt, at
 // request time — not stored in history, not inside the system prompt. This
 // keeps the static prefix cacheable while only the tiny date note changes.

@@ -61,7 +61,10 @@ func Connect(ctx context.Context, servers map[string]config.MCPServerConfig, reg
 		m.clients = append(m.clients, client)
 		for _, info := range tools {
 			a := &toolAdapter{client: client, info: info, name: ToolName(name, info.Name)}
-			reg.Register(a)
+			// MCP tools are loaded on demand: their full JSON Schema can be large
+			// and numerous, so they are advertised by name only until the model
+			// pulls one in via search_tools (see tool.Registry deferral).
+			reg.RegisterDeferred(a)
 			st.Tools = append(st.Tools, a.name)
 		}
 		m.Status = append(m.Status, st)

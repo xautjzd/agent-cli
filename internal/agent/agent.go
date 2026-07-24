@@ -127,6 +127,12 @@ type Agent struct {
 	// Usage, when set, records per-turn token consumption and cost keyed by
 	// provider and model (shared across sessions and subagents).
 	Usage *usage.Recorder
+	// Activation, when set, enables deferred tool loading: only core tools and
+	// deferred tools the model has explicitly loaded (via search_tools) are
+	// advertised each request, keeping per-request tool overhead flat as MCP
+	// servers add many schema-heavy tools. nil advertises every registered tool
+	// (the behavior when no deferred tools exist).
+	Activation *tool.Activation
 	// Now, when set, supplies the current date. It is injected into each
 	// request as a small note right after the system prompt — never stored in
 	// history and never in the system prompt itself — so the static prompt
@@ -179,20 +185,11 @@ func (a *Agent) RunMessage(ctx context.Context, userMsg provider.Message) (strin
 	start := time.Now()
 	var stats TurnStats
 
-	var toolDefs []provider.ToolDef
-	for _, t := range a.Tools.All() {
-		toolDefs = append(toolDefs, provider.ToolDef{
-			Name:        t.Name(),
-			Description: t.Description(),
-			Parameters:  t.Schema(),
-		})
-	}
-
 	for turn := 0; turn < a.MaxTurns; turn++ {
 		resp, streamed, err := a.complete(ctx, provider.Request{
 			Model:    a.Model,
 			Messages: a.requestMessages(),
-			Tools:    toolDefs,
+			Tools:    a.toolDefs(),
 		})
 		if err != nil {
 			return "", err
@@ -378,6 +375,36 @@ func (a *Agent) appendToolResult(call provider.ToolCall, out toolOutcome) {
 // For providers with a dedicated system field (Anthropic) the note folds into
 // that field; for message-array providers (OpenAI/DeepSeek) it is a separate
 // message that keeps the system prompt independently cacheable.
+// toolDefs builds the tool catalog advertised on a request. Without an
+// Activation set it advertises every registered tool (the historical behavior,
+// used when nothing is deferred). With one, it advertises core tools plus only
+// the deferred tools the model has loaded via search_tools, so the per-request
+// tool payload stays flat as MCP servers contribute many schema-heavy tools.
+// It is recomputed each turn so a tool loaded mid-turn becomes callable on the
+// next round-trip.
+func (a *Agent) toolDefs() []provider.ToolDef {
+	var tools []tool.Tool
+	if a.Activation == nil {
+		tools = a.Tools.All()
+	} else {
+		tools = a.Tools.Core()
+		for _, t := range a.Tools.Deferred() {
+			if a.Activation.IsActive(t.Name()) {
+				tools = append(tools, t)
+			}
+		}
+	}
+	defs := make([]provider.ToolDef, 0, len(tools))
+	for _, t := range tools {
+		defs = append(defs, provider.ToolDef{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Parameters:  t.Schema(),
+		})
+	}
+	return defs
+}
+
 func (a *Agent) requestMessages() []provider.Message {
 	if a.Now == nil || len(a.messages) == 0 {
 		return a.messages

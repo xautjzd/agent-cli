@@ -362,22 +362,34 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	}
 	registry.Register(&subagent.Task{Spawner: spawner})
 
-	systemPrompt := (&agent.PromptBuilder{
-		WorkDir: workDir,
-		Skills:  skillRepo,
-		Memory:  memStore,
-	}).Build()
-
-	// Connect any configured MCP servers and merge their tools into the
-	// registry before the agent's system prompt is built, so MCP tools are
-	// part of the advertised tool set. Servers that fail to connect are
-	// recorded on the manager (see /mcp) but never block startup.
+	// Connect any configured MCP servers and merge their tools into the registry
+	// before the system prompt is built, so the deferred-tool catalog is part of
+	// the (cacheable) prompt. MCP tools register as deferred: advertised by name
+	// only and loaded on demand via search_tools. Servers that fail to connect
+	// are recorded on the manager (see /mcp) but never block startup.
 	mcpMgr := mcp.Connect(context.Background(), cfg.MCPServers, registry)
 	for _, s := range mcpMgr.Status {
 		if !s.OK() {
 			fmt.Fprintf(os.Stderr, "warning: MCP server %q failed: %v\n", s.Name, s.Err)
 		}
 	}
+
+	// Enable deferred tool loading when tools were actually deferred (MCP tools
+	// present) and it is not disabled. The search_tools meta-tool is a core tool
+	// so the model can always reach it; nil activation keeps the historical
+	// "advertise every tool" behavior for sessions with no MCP tools.
+	var activation *tool.Activation
+	if cfg.LazyTools != "off" && len(registry.Deferred()) > 0 {
+		activation = &tool.Activation{}
+		registry.Register(&tool.SearchTools{Registry: registry, Activation: activation})
+	}
+
+	systemPrompt := (&agent.PromptBuilder{
+		WorkDir: workDir,
+		Skills:  skillRepo,
+		Memory:  memStore,
+		Tools:   registry,
+	}).Build()
 
 	// Cross-session usage/cost tracking, shared with subagents so delegated
 	// work counts toward the project totals. Prices come from models.dev
@@ -398,6 +410,7 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	ag.AutoCompact = cfg.AutoCompact != "off"
 	ag.ContextLimit = cfg.ContextLimit
 	ag.Usage = usageRec
+	ag.Activation = activation
 	// Supply today's date as a small note after the (byte-stable) system
 	// prompt, so time-sensitive answers are correct without churning the
 	// cacheable prefix.

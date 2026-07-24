@@ -27,27 +27,69 @@ type Tool interface {
 }
 
 // Registry holds the tools available to one agent session.
+//
+// Tools are either core or deferred. Core tools are advertised to the model on
+// every request. Deferred tools (typically the many, schema-heavy MCP tools)
+// are listed by name+description in the system prompt only; their full schema
+// is pulled into the request on demand via the search_tools meta-tool. This
+// keeps per-request tool overhead flat as MCP servers add capabilities, instead
+// of growing linearly with every tool's JSON Schema (see SearchTools).
 type Registry struct {
-	tools map[string]Tool
-	order []string
+	tools    map[string]Tool
+	order    []string
+	deferred map[string]bool
 }
 
 // NewRegistry builds a registry from the given tools.
 func NewRegistry(tools ...Tool) *Registry {
-	r := &Registry{tools: map[string]Tool{}}
+	r := &Registry{tools: map[string]Tool{}, deferred: map[string]bool{}}
 	for _, t := range tools {
 		r.Register(t)
 	}
 	return r
 }
 
-// Register adds a tool, replacing any previous tool with the same name.
+// Register adds a core tool, replacing any previous tool with the same name.
 func (r *Registry) Register(t Tool) {
 	if _, exists := r.tools[t.Name()]; !exists {
 		r.order = append(r.order, t.Name())
 	}
 	r.tools[t.Name()] = t
+	delete(r.deferred, t.Name())
 }
+
+// RegisterDeferred adds a tool that is loaded on demand: it is callable and
+// discoverable like any other tool, but excluded from the advertised tool set
+// until activated (see Core/Deferred and SearchTools).
+func (r *Registry) RegisterDeferred(t Tool) {
+	r.Register(t)
+	r.deferred[t.Name()] = true
+}
+
+// Core returns the eagerly-advertised tools in registration order.
+func (r *Registry) Core() []Tool {
+	out := make([]Tool, 0, len(r.order))
+	for _, name := range r.order {
+		if !r.deferred[name] {
+			out = append(out, r.tools[name])
+		}
+	}
+	return out
+}
+
+// Deferred returns the on-demand tools in registration order.
+func (r *Registry) Deferred() []Tool {
+	out := make([]Tool, 0)
+	for _, name := range r.order {
+		if r.deferred[name] {
+			out = append(out, r.tools[name])
+		}
+	}
+	return out
+}
+
+// IsDeferred reports whether a registered tool is loaded on demand.
+func (r *Registry) IsDeferred(name string) bool { return r.deferred[name] }
 
 // Get looks a tool up by name.
 func (r *Registry) Get(name string) (Tool, bool) {

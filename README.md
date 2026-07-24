@@ -301,8 +301,11 @@ Goal set: make `go test ./...` pass and gofmt report no diffs
 - **Mutation tools are hard-disabled** (`write_file`, `edit_file`, `remember`, `forget`
   are removed from the registry — not just discouraged). `bash` and the read tools stay
   available for exploration, with instructions not to run mutating commands.
-- The prompt changes to `plan>` and every input becomes a planning turn: the agent
-  explores and ends with a concise numbered plan.
+- The prompt changes to `plan>` and every input becomes a planning turn tuned for
+  **token efficiency** (like Claude Code / Codex / opencode): the agent explores only what it
+  must and returns a short, **high-level** plan — Goal · Approach · Changes · Steps · Verify —
+  with **no code, no pasted file contents, no line-by-line detail**. The detail is filled in
+  during implementation, not the plan.
 - After each plan, an approval gate: **`y`** restores full tools, exits plan mode, and
   tells the agent to implement (goal checks apply as usual); **Enter** keeps refining
   the plan; **`q`** (or `/plan off`) exits without implementing.
@@ -827,6 +830,16 @@ handshake timeout; a server that fails to connect is reported (a warning on stde
 `/mcp`) but never blocks startup or the other servers. Stdio child processes are terminated
 on exit. Run **`/mcp`** to see each server's transport, status, and contributed tools; the
 namespaced tools also appear in `/tools`.
+
+**Deferred (on-demand) tool loading.** MCP schemas can be large and numerous, so sending
+every one on every request scales badly. Instead, MCP tools are advertised in the system
+prompt by **name + one-line description only** (a compact, cacheable catalog); their full
+JSON Schema is pulled into context on demand through the built-in **`search_tools`**
+meta-tool, which activates a tool so the model can call it on the next turn. This keeps
+per-request tool overhead roughly flat as you add MCP servers, rather than growing linearly
+with every tool's schema — the same deferred-loading approach Claude Code uses. Built-in
+tools stay eagerly advertised. Set `"lazy_tools": "off"` in `config.json` to advertise every
+MCP tool on every request instead.
 
 ## Skills
 

@@ -32,6 +32,24 @@ func (f *fakeTool) Execute(_ context.Context, _ json.RawMessage) (string, error)
 	return "ran", nil
 }
 
+// The plan prompt enforces concise, high-level, token-efficient planning:
+// it carries the task, forbids code/detail, asks for minimal exploration, and
+// prescribes the skimmable Goal/Approach/Changes/Steps/Verify shape.
+func TestPlanPromptIsHighLevelAndConcise(t *testing.T) {
+	p := planPrompt("add a --version flag")
+	if !strings.Contains(p, "add a --version flag") {
+		t.Error("plan prompt must carry the task")
+	}
+	for _, want := range []string{
+		"high-level", "Explore only what you must", "do NOT write actual code",
+		"Goal:", "Approach:", "Changes:", "Steps:", "Verify:",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("plan prompt missing directive %q:\n%s", want, p)
+		}
+	}
+}
+
 func TestPlanModeRestrictsTools(t *testing.T) {
 	r, stub := planRepl(t, "\n") // approval prompt answered with Enter (keep planning)
 
@@ -75,7 +93,7 @@ func TestPlanApprovalImplementsWithFullTools(t *testing.T) {
 	}
 	// The implement turn was sent with full tools advertised.
 	last := stub.last.Messages[len(stub.last.Messages)-1]
-	if !strings.Contains(last.Content, "plan is approved") {
+	if !strings.Contains(last.Content, "approved") || !strings.Contains(last.Content, "Implement") {
 		t.Errorf("implement prompt wrong: %q", last.Content)
 	}
 	found := false

@@ -59,14 +59,21 @@ func (r *Repl) enterPlanMode() {
 	r.fullTools = r.Agent.Tools
 	restricted := tool.NewRegistry()
 	for _, t := range r.fullTools.All() {
-		if !mutatingToolNames[t.Name()] {
+		if mutatingToolNames[t.Name()] {
+			continue
+		}
+		// Preserve deferral so MCP tools stay loaded-on-demand in plan mode too,
+		// rather than re-inflating the request with every schema.
+		if r.fullTools.IsDeferred(t.Name()) {
+			restricted.RegisterDeferred(t)
+		} else {
 			restricted.Register(t)
 		}
 	}
 	r.Agent.Tools = restricted
 	r.Tools = restricted
 	r.planMode = true
-	fmt.Fprintln(r.Out, "Plan mode on — the agent will explore read-only and propose a plan. Type your task; /plan off to exit.")
+	fmt.Fprintln(r.Out, "Plan mode on — the agent explores read-only and proposes a concise, high-level plan (no code, no edits). Type your task; /plan off to exit.")
 }
 
 // exitPlanMode restores the full tool registry.
@@ -109,7 +116,7 @@ func (r *Repl) runPlanTurn(ctx context.Context, input string) error {
 	case "y", "yes":
 		r.exitPlanMode()
 		fmt.Fprintln(r.Out, "Plan approved — implementing.")
-		_, err := r.Agent.Run(ctx, "The plan is approved. Implement it now with the available tools, verifying your work (build, tests) as you go.")
+		_, err := r.Agent.Run(ctx, "The plan above is approved. Implement it now with the available tools, following the plan and filling in the implementation detail; verify your work (build, tests) as you go.")
 		r.saveSession("(plan approved — implement)")
 		if err != nil {
 			return err
@@ -124,11 +131,19 @@ func (r *Repl) runPlanTurn(ctx context.Context, input string) error {
 }
 
 func planPrompt(task string) string {
-	return fmt.Sprintf(`[Plan mode] You are in planning mode. Explore the project with the available read-only tools as needed, then propose a concrete implementation plan.
+	return fmt.Sprintf(`[Plan mode] You are planning, not implementing. Produce a concise, high-level plan — nothing more.
 
-Rules:
-- Do NOT modify any files or state. File-mutation tools are disabled; do not run mutating shell commands (no writes, installs, deletions, git commits).
-- End your reply with a concise numbered plan the user can approve.
+Efficiency (important — do not waste tokens):
+- Explore only what you must. Prefer targeted searches and reads over reading whole files; do not exhaustively survey the codebase.
+- Plan, don't detail: do NOT write actual code, paste file contents, or give line-by-line detail. Describe the approach, not the implementation — the detail belongs to the implementation phase.
+- Do NOT modify anything. File-mutation tools are disabled; do not run mutating shell commands (no writes, installs, deletions, git commits).
+
+Deliver a short, skimmable plan the user can approve, in this shape (a few lines each):
+- Goal: one line.
+- Approach: 2–4 sentences on the overall strategy and key decisions.
+- Changes: one bullet per file/component to touch — what, not how.
+- Steps: a brief numbered list of the implementation order.
+- Verify: how correctness will be checked (build, tests).
 
 Task: %s`, task)
 }

@@ -101,6 +101,12 @@ type Config struct {
 	// Providers holds named provider profiles for any OpenAI-compatible
 	// endpoint.
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
+	// LazyTools controls deferred (on-demand) loading of MCP tools. When on
+	// (the default), MCP tools are advertised by name+description in the system
+	// prompt and their full schemas are pulled in via the search_tools meta-tool
+	// only when needed, keeping per-request tool overhead flat as servers add
+	// many schema-heavy tools. "off" advertises every MCP tool on every request.
+	LazyTools string `json:"lazy_tools,omitempty"`
 	// MCPServers declares Model Context Protocol servers whose tools are
 	// merged into the agent's tool set at startup, keyed by a short server
 	// name (Claude Code's "mcpServers" convention).
