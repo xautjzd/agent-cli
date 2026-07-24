@@ -421,9 +421,25 @@ func TestProviderAndModelArgumentCompletion(t *testing.T) {
 	if cands := r.completionsFor("/goal something", 15); cands != nil {
 		t.Errorf("/goal should not complete arguments: %+v", cands)
 	}
-	// Only the first argument completes; later words are free text.
-	if cands := r.completionsFor("/provider glm extra", 19); cands != nil {
-		t.Errorf("second argument should not complete: %+v", cands)
+	// "/provider <name> <model>" completes the named provider's models, not
+	// the currently active provider's. anthropic is active from above.
+	cands = r.completionsFor("/provider glm glm-4", 19)
+	if len(cands) == 0 {
+		t.Fatal("no model suggestions for /provider glm")
+	}
+	for _, c := range cands {
+		if !strings.HasPrefix(c.text, "glm-4") {
+			t.Errorf("unrelated model suggested for glm: %q", c.text)
+		}
+	}
+
+	// A third argument is free text — completion stops after the model.
+	if cands := r.completionsFor("/provider glm glm-4 extra", 25); cands != nil {
+		t.Errorf("third argument should not complete: %+v", cands)
+	}
+	// Other commands still stop after their first argument.
+	if cands := r.completionsFor("/model claude-3 extra", 21); cands != nil {
+		t.Errorf("/model second argument should not complete: %+v", cands)
 	}
 }
 

@@ -166,13 +166,23 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 	if !found {
 		return nil
 	}
-	// Only complete the first argument; later words are free text.
 	argStart := 1 + len(cmd) + 1
+
+	// Second argument: only "/provider <name> <model>" completes one — the
+	// chosen provider's model list. Every other command stops after arg one.
 	if start != argStart {
-		return nil
+		if cmd != "provider" {
+			return nil
+		}
+		name, _, hasSecond := strings.Cut(rest, " ")
+		if !hasSecond || start != argStart+len(name)+1 {
+			return nil
+		}
+		query := strings.ToLower(value[start:pos])
+		return filterCandidates(r.modelOptions(name), query)
 	}
+
 	query := strings.ToLower(value[argStart:pos])
-	_ = rest
 
 	var options [][2]string // name, description
 	switch cmd {
@@ -191,19 +201,7 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 			options = append(options, [2]string{p.Name, p.Label + " · " + p.DefaultModel})
 		}
 	case "model":
-		// Offer the configured profile's own model first — it may be newer
-		// than the catalog knows — then the catalog's list.
-		seen := map[string]bool{}
-		if p, ok := r.Cfg.Providers[r.Cfg.Provider]; ok && p.Model != "" {
-			options = append(options, [2]string{p.Model, "current profile"})
-			seen[p.Model] = true
-		}
-		for _, m := range catalog.ModelsFor(r.Cfg.Provider) {
-			if seen[m] {
-				continue
-			}
-			options = append(options, [2]string{m, r.Cfg.Provider})
-		}
+		options = r.modelOptions(r.Cfg.Provider)
 	case "theme":
 		for _, n := range theme.Names() {
 			th, _ := theme.Get(n)
@@ -218,6 +216,35 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 		return nil
 	}
 
+	return filterCandidates(options, query)
+}
+
+// modelOptions lists model suggestions for a provider: the configured profile's
+// own model first — it may be newer than the catalog knows — then the catalog's
+// known models. Used for both "/model" and "/provider <name> <model>".
+func (r *Repl) modelOptions(name string) [][2]string {
+	var options [][2]string
+	seen := map[string]bool{}
+	if p, ok := r.Cfg.Providers[name]; ok && p.Model != "" {
+		desc := "your config"
+		if name == r.Cfg.Provider {
+			desc = "current profile"
+		}
+		options = append(options, [2]string{p.Model, desc})
+		seen[p.Model] = true
+	}
+	for _, m := range catalog.ModelsFor(name) {
+		if seen[m] {
+			continue
+		}
+		options = append(options, [2]string{m, name})
+	}
+	return options
+}
+
+// filterCandidates keeps options whose name prefix- or substring-matches query,
+// prefix matches ranked first, each group sorted, capped at maxCandidates.
+func filterCandidates(options [][2]string, query string) []candidate {
 	var prefix, substr []candidate
 	for _, o := range options {
 		c := candidate{text: o[0], desc: o[1]}
