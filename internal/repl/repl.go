@@ -989,6 +989,18 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 		fmt.Fprintln(r.Out, "warning: could not persist provider:", err)
 	} else {
 		saved = "saved"
+		// Reconcile the top-level base_url with the new provider. A stale value
+		// from the previous provider would shadow a profile/preset endpoint on
+		// reload (applyPreset only fills base_url when it is empty), so clear it
+		// when the provider owns its endpoint and only keep an explicit one for
+		// a bare/custom provider that has nowhere else to get it.
+		baseURL := cfg.BaseURL
+		if providerOwnsBaseURL(cfg, name) {
+			baseURL = ""
+		}
+		if err := config.SetScoped(config.ScopeGlobal, "", "base_url", baseURL); err != nil {
+			fmt.Fprintln(r.Out, "warning: could not persist base_url:", err)
+		}
 		if model != "" {
 			if err := config.SetScoped(config.ScopeGlobal, "", "model", model); err != nil {
 				fmt.Fprintln(r.Out, "warning: could not persist model:", err)
@@ -998,6 +1010,19 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 	fmt.Fprintf(r.Out, "Switched to provider=%s model=%s (history preserved, %s)\n", name, cfg.Model, saved)
 	r.stripImagesIfNeeded()
 	return nil
+}
+
+// providerOwnsBaseURL reports whether the named provider supplies its own
+// endpoint — via a user profile or a built-in catalog preset — so the top-level
+// base_url should be cleared rather than pinned to the resolved value.
+func providerOwnsBaseURL(cfg *config.Config, name string) bool {
+	if p, ok := cfg.Providers[name]; ok && p.BaseURL != "" {
+		return true
+	}
+	if p, ok := catalog.Lookup(name); ok && p.BaseURL != "" {
+		return true
+	}
+	return false
 }
 
 // promptProviderKey asks for a provider's API key (masked), including where to

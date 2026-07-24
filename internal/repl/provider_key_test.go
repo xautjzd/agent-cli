@@ -55,6 +55,35 @@ func TestProviderSwitchPersistsToGlobal(t *testing.T) {
 	}
 }
 
+// TestProviderSwitchReconcilesBaseURL verifies a stale top-level base_url from a
+// previous provider is cleared when switching to a preset that owns its own
+// endpoint, so the preset's base_url resolves on the next load instead of the
+// old one shadowing it.
+func TestProviderSwitchReconcilesBaseURL(t *testing.T) {
+	isolateEnv(t)
+	// Seed a stale OpenAI-style base_url as if a prior provider had set it.
+	if err := config.SetScoped(config.ScopeGlobal, "", "base_url", "https://api.deepseek.com"); err != nil {
+		t.Fatal(err)
+	}
+	r, _, _ := newTestRepl(t, "")
+
+	// deepseek-anthropic is an Anthropic-format preset, so the switch succeeds
+	// without a key prompt.
+	if err := r.dispatch(context.Background(), "/provider deepseek-anthropic"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadIn("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "deepseek-anthropic" {
+		t.Fatalf("provider not persisted: %q", cfg.Provider)
+	}
+	if cfg.BaseURL != "https://api.deepseek.com/anthropic" {
+		t.Errorf("base_url did not follow the new provider: got %q", cfg.BaseURL)
+	}
+}
+
 // TestProviderKeyPromptCancel confirms an empty key cancels the switch.
 func TestProviderKeyPromptCancel(t *testing.T) {
 	isolateEnv(t)
