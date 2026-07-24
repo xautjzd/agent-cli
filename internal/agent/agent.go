@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -192,6 +193,12 @@ func (a *Agent) RunMessage(ctx context.Context, userMsg provider.Message) (strin
 			Tools:    a.toolDefs(),
 		})
 		if err != nil {
+			// A user interrupt (Esc/Ctrl-C) cancels the context: keep whatever
+			// streamed so far and leave history on an assistant turn, so the
+			// user can add more and continue instead of losing the exchange.
+			if ctx.Err() != nil {
+				a.recordInterrupted(resp)
+			}
 			return "", err
 		}
 		// Accumulate usage; some providers omit TotalTokens, so derive it.
@@ -233,6 +240,37 @@ func (a *Agent) RunMessage(ctx context.Context, userMsg provider.Message) (strin
 		a.executeToolCalls(ctx, resp.Message.ToolCalls)
 	}
 	return "", fmt.Errorf("reached max turns (%d) without a final answer", a.MaxTurns)
+}
+
+// interruptedMarker is appended to history when the user aborts a turn, so the
+// model knows on the next request that its previous answer was cut short.
+const interruptedMarker = "[Response interrupted by user]"
+
+// recordInterrupted keeps the conversation consistent after the user aborts a
+// turn. It preserves any assistant text that already streamed to the screen and
+// ensures the transcript ends on an assistant turn, so the user's follow-up
+// message alternates cleanly and the exchange can continue. partial is the
+// possibly-partial response the provider returned on cancellation (may be nil).
+func (a *Agent) recordInterrupted(partial *provider.Response) {
+	if partial != nil && strings.TrimSpace(partial.Message.Content) != "" {
+		msg := partial.Message
+		msg.Role = provider.RoleAssistant
+		msg.ReasoningContent = ""
+		// Any tool calls were never executed; dropping them avoids an
+		// unanswered tool_use that would make the next request invalid.
+		msg.ToolCalls = nil
+		msg.Content = strings.TrimRight(msg.Content, "\n") + "\n\n" + interruptedMarker
+		a.messages = append(a.messages, msg)
+		return
+	}
+	// Nothing usable streamed. If the transcript would otherwise end on a user
+	// or tool message, add a marker so roles still alternate on the next turn.
+	if n := len(a.messages); n > 0 && a.messages[n-1].Role != provider.RoleAssistant {
+		a.messages = append(a.messages, provider.Message{
+			Role:    provider.RoleAssistant,
+			Content: interruptedMarker,
+		})
+	}
 }
 
 // deniedResult is fed back when the gate refuses a call, so the model can
@@ -438,10 +476,16 @@ func (a *Agent) complete(ctx context.Context, req provider.Request) (*provider.R
 			sink.OnAssistantDelta(d.Content)
 		}
 	})
+	// Always close the streamed block (reset the tint, clear the sink's
+	// streaming state) — including on a user interrupt, where the provider
+	// hands back the partial message so the caller can preserve it.
+	sink.OnStreamEnd()
 	if err != nil {
+		if ctx.Err() != nil {
+			return resp, true, err
+		}
 		return nil, false, err
 	}
-	sink.OnStreamEnd()
 	return resp, true, nil
 }
 

@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/xautjzd/agent-cli/internal/provider"
@@ -168,6 +170,66 @@ func TestRestoreKeepsSystemPrompt(t *testing.T) {
 	h := ag.History()
 	if len(h) != 3 || h[0].Content != "the system prompt" || h[2].Content != "old answer" {
 		t.Errorf("restore wrong: %+v", h)
+	}
+}
+
+// interruptProvider simulates a user aborting mid-response: it cancels the
+// turn's context and returns the partial answer alongside the cancellation
+// error, mirroring what the real streaming providers do on interrupt.
+type interruptProvider struct {
+	cancel  context.CancelFunc
+	partial string
+}
+
+func (p *interruptProvider) Name() string { return "interrupt" }
+func (p *interruptProvider) Chat(ctx context.Context, req provider.Request) (*provider.Response, error) {
+	p.cancel()
+	return &provider.Response{Message: provider.Message{
+		Role:    provider.RoleAssistant,
+		Content: p.partial,
+	}}, context.Canceled
+}
+
+func TestInterruptPreservesPartialAnswer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ag := New(&interruptProvider{cancel: cancel, partial: "here is the start"},
+		"m", tool.NewRegistry(), "system prompt", nil, 5)
+
+	_, err := ag.Run(ctx, "the question")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+
+	h := ag.History()
+	last := h[len(h)-1]
+	if last.Role != provider.RoleAssistant {
+		t.Fatalf("history must end on an assistant turn, got %s", last.Role)
+	}
+	if !strings.Contains(last.Content, "here is the start") {
+		t.Errorf("partial answer not preserved: %q", last.Content)
+	}
+	if !strings.Contains(last.Content, interruptedMarker) {
+		t.Errorf("interruption not marked: %q", last.Content)
+	}
+	// The user message must still be present, before the assistant turn.
+	if h[len(h)-2].Role != provider.RoleUser || h[len(h)-2].Content != "the question" {
+		t.Errorf("user message not retained: %+v", h[len(h)-2])
+	}
+}
+
+func TestInterruptWithNoOutputStillAlternates(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ag := New(&interruptProvider{cancel: cancel, partial: ""},
+		"m", tool.NewRegistry(), "system prompt", nil, 5)
+
+	if _, err := ag.Run(ctx, "the question"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+
+	h := ag.History()
+	last := h[len(h)-1]
+	if last.Role != provider.RoleAssistant || last.Content != interruptedMarker {
+		t.Errorf("expected a lone interruption marker, got %+v", last)
 	}
 }
 

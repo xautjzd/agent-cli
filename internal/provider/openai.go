@@ -320,11 +320,7 @@ func (p *openAICompatible) ChatStream(ctx context.Context, req Request, onDelta 
 			c.Function.Arguments += tc.Function.Arguments
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("%s: stream read: %w", p.name, err)
-	}
-
-	return &Response{
+	partial := &Response{
 		Message: Message{
 			Role:             RoleAssistant,
 			Content:          content.String(),
@@ -333,7 +329,21 @@ func (p *openAICompatible) ChatStream(ctx context.Context, req Request, onDelta 
 		},
 		FinishReason: finish,
 		Usage:        usage,
-	}, nil
+	}
+	if err := scanner.Err(); err != nil {
+		// A user interrupt cancels the context and aborts the read: hand back
+		// the partial message so the caller can preserve what already streamed.
+		if ctx.Err() != nil {
+			return partial, ctx.Err()
+		}
+		return nil, fmt.Errorf("%s: stream read: %w", p.name, err)
+	}
+	// The scanner can also stop cleanly (no error) when the context is
+	// cancelled between reads; surface that as an interrupt too.
+	if ctx.Err() != nil {
+		return partial, ctx.Err()
+	}
+	return partial, nil
 }
 
 func truncate(s string, n int) string {

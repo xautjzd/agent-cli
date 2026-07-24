@@ -142,6 +142,13 @@ func (p *anthropicProvider) ChatStream(ctx context.Context, req Request, onDelta
 		}
 	}
 	if err := stream.Err(); err != nil {
+		// On a user interrupt (cancelled context) hand back the partial message
+		// assembled so far, so the caller can preserve what already streamed.
+		if ctx.Err() != nil {
+			if resp, ferr := fromAnthropicMessage(&acc); ferr == nil {
+				return resp, ctx.Err()
+			}
+		}
 		return nil, p.wrapError(err)
 	}
 	// A stream that yielded nothing at all means the endpoint answered

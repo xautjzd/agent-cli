@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -321,4 +322,102 @@ func lineWidth(s string) int {
 		i++
 	}
 	return len([]rune(b.String()))
+}
+
+// TestTUIDoubleEscInterrupts verifies a single Esc during a running turn only
+// arms the interrupt, while a second Esc within the window cancels it.
+func TestTUIDoubleEscInterrupts(t *testing.T) {
+	m := newTestTUI(t)
+	cancelled := false
+	m.busy = true
+	m.turnCancel = func() { cancelled = true }
+
+	// First Esc arms but does not cancel.
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.escArmed {
+		t.Fatal("first esc should arm the interrupt")
+	}
+	if cancelled {
+		t.Fatal("first esc should not cancel the turn")
+	}
+
+	// Second Esc within the window cancels.
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !cancelled {
+		t.Fatal("second esc should cancel the turn")
+	}
+	if m.escArmed {
+		t.Fatal("interrupt should disarm after firing")
+	}
+}
+
+// TestTUIStaleEscDoesNotInterrupt verifies an armed Esc older than escWindow no
+// longer counts as the first tap of a double-tap.
+func TestTUIStaleEscDoesNotInterrupt(t *testing.T) {
+	m := newTestTUI(t)
+	cancelled := false
+	m.busy = true
+	m.turnCancel = func() { cancelled = true }
+
+	m.escArmed = true
+	m.escAt = time.Now().Add(-2 * escWindow)
+
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cancelled {
+		t.Fatal("a stale arm should not let a single esc interrupt")
+	}
+	if !m.escArmed {
+		t.Fatal("the esc should re-arm the window")
+	}
+}
+
+// TestTUICtrlCInterruptsImmediately verifies Ctrl-C still cancels in one press.
+func TestTUICtrlCInterruptsImmediately(t *testing.T) {
+	m := newTestTUI(t)
+	cancelled := false
+	m.busy = true
+	m.turnCancel = func() { cancelled = true }
+
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !cancelled {
+		t.Fatal("Ctrl-C should cancel the turn immediately")
+	}
+}
+
+// TestTUIInterruptReturnsToPrompt verifies that after an interrupt, the turn
+// finishing with done=true (as handleLine reports for a cancelled context)
+// returns to the input prompt instead of quitting the program.
+func TestTUIInterruptReturnsToPrompt(t *testing.T) {
+	m := newTestTUI(t)
+	m.busy = true
+	m.turnCancel = func() {}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !m.interrupting {
+		t.Fatal("interrupt should flag the abort")
+	}
+
+	// The cancelled turn reports done=true; the model must not quit.
+	_, cmd := m.Update(turnDoneMsg{done: true})
+	if m.quitting {
+		t.Fatal("an interrupt must return to the prompt, not quit")
+	}
+	if cmd != nil {
+		t.Fatal("no quit command should be issued on interrupt")
+	}
+	if m.busy || m.interrupting {
+		t.Fatal("turn state should be reset after the interrupt completes")
+	}
+}
+
+// TestTUINormalExitStillQuits verifies a real /exit (done=true without an
+// interrupt) still quits the session.
+func TestTUINormalExitStillQuits(t *testing.T) {
+	m := newTestTUI(t)
+	m.busy = true
+
+	m.Update(turnDoneMsg{done: true})
+	if !m.quitting {
+		t.Fatal("done=true without an interrupt should quit")
+	}
 }

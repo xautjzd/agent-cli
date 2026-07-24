@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -69,6 +70,11 @@ func (s *scrollback) Reset() {
 
 type refreshMsg struct{}             // scrollback changed; re-render the viewport
 type turnDoneMsg struct{ done bool } // a turn finished (done => quit)
+type escExpireMsg struct{}           // the double-Esc arm window elapsed
+
+// escWindow is how long after a first Esc a second Esc still counts as the
+// double-tap that interrupts a running turn.
+const escWindow = time.Second
 type askMsg struct {                 // a mid-turn text prompt needs answering
 	prompt string
 	secret bool // mask the input (API keys, passwords)
@@ -125,6 +131,16 @@ type tuiModel struct {
 
 	busy       bool               // a turn is running
 	turnCancel context.CancelFunc // cancels the running turn (Ctrl-C)
+
+	// escArmed is set after the first Esc during a running turn: the next Esc
+	// within escWindow interrupts it (double-Esc to abort, like the mainstream
+	// agents). escAt records when the first Esc landed so a stale arm expires.
+	escArmed bool
+	escAt    time.Time
+	// interrupting marks that the current turn is ending because the user
+	// aborted it (Esc/Ctrl-C), so turnDone returns to the prompt instead of
+	// quitting — the user can add more and continue the conversation.
+	interrupting bool
 
 	// completion popup state (reuses the inline editor's logic)
 	cands  []candidate
@@ -321,6 +337,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 
+	case escExpireMsg:
+		// The double-Esc window elapsed without a second tap: disarm so the
+		// footer drops the "press esc again" prompt.
+		if m.escArmed && time.Since(m.escAt) >= escWindow {
+			m.escArmed = false
+		}
+		return m, nil
+
 	case askMsg:
 		// A mid-turn prompt: focus a fresh answer field at the bottom, masking
 		// the echo for secrets (API keys).
@@ -350,12 +374,17 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case turnDoneMsg:
 		m.busy = false
 		m.turnCancel = nil
+		m.escArmed = false
 		m.input.Prompt = m.basePrompt()
 		m.input.Focus()
-		if msg.done {
+		// handleLine reports done=true on a cancelled context, but a user
+		// interrupt should return to the prompt, not quit — only a real /exit
+		// ends the session.
+		if msg.done && !m.interrupting {
 			m.quitting = true
 			return m, tea.Quit
 		}
+		m.interrupting = false
 		m.refreshViewport()
 		return m, nil
 
@@ -394,16 +423,43 @@ func (m *tuiModel) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleAskKey(key)
 	}
 	if m.busy {
-		// While a turn runs, only interruption is accepted.
-		if key.Type == tea.KeyCtrlC {
-			if m.turnCancel != nil {
-				m.turnCancel()
-			}
-			fmt.Fprintln(m.sb, "\033[2m⏹ interrupting…\033[0m")
-		}
-		return m, nil
+		return m.handleBusyKey(key)
 	}
 	return m.handleIdleKey(key)
+}
+
+// handleBusyKey handles keys while a turn runs: the only accepted actions are
+// interrupting it, either with Ctrl-C or by pressing Esc twice in quick
+// succession (the double-tap the mainstream agents use to abort streaming).
+func (m *tuiModel) handleBusyKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyCtrlC:
+		m.interruptTurn()
+		return m, nil
+	case tea.KeyEsc:
+		if m.escArmed && time.Since(m.escAt) <= escWindow {
+			m.escArmed = false
+			m.interruptTurn()
+			return m, nil
+		}
+		// First tap: arm the window and prompt for a confirming second tap.
+		m.escArmed = true
+		m.escAt = time.Now()
+		return m, tea.Tick(escWindow, func(time.Time) tea.Msg { return escExpireMsg{} })
+	}
+	return m, nil
+}
+
+// interruptTurn stops the running turn and returns to the input prompt: it
+// cancels the turn (halting streaming/tool execution) and flags the abort so
+// turnDone does not quit. Whatever streamed so far is kept, so the user can add
+// more and continue the conversation.
+func (m *tuiModel) interruptTurn() {
+	m.interrupting = true
+	if m.turnCancel != nil {
+		m.turnCancel()
+	}
+	fmt.Fprintln(m.sb, "\033[2m⏹ interrupted — type to add more and continue\033[0m")
 }
 
 // handlePickKey drives the selection overlay: ↑/↓ move, Enter chooses, Esc or
@@ -780,7 +836,12 @@ func (m *tuiModel) footer() string {
 	case m.ask != nil:
 		b.WriteString(box.Render(m.input.View()))
 	case m.busy:
-		b.WriteString(box.Render(styleWorking.Render("working… (Ctrl-C to interrupt)")))
+		hint := "working… (esc esc or Ctrl-C to interrupt)"
+		if m.escArmed {
+			hint = "working… (press esc again to interrupt)"
+		}
+		b.WriteString(box.Render(styleWorking.Render(hint)))
+		b.WriteString("\n" + styleHint.Render("  interrupting keeps the conversation — add more and continue"))
 	default:
 		b.WriteString(box.Render(m.input.View()))
 		b.WriteString("\n" + styleHint.Render("  ↑↓ history/menu · tab accept · pgup/pgdn scroll · /copy · /exit"))
