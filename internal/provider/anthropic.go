@@ -207,7 +207,13 @@ func (p *anthropicProvider) buildParams(req Request, defaultMaxTokens int) (*ant
 	effort, _ := ParseEffort(p.thinking)
 	switch {
 	case effort == EffortOff:
-		// Leave the union zero so the request carries no thinking field.
+		// Send an explicit disabled block rather than omitting the field.
+		// Native Anthropic treats an absent field as off, but Anthropic-
+		// compatible gateways (e.g. GLM/Zhipu) default thinking ON when it is
+		// omitted, so "off" only takes effect when disabled is stated outright.
+		params.Thinking = anthropic.ThinkingConfigParamUnion{
+			OfDisabled: &anthropic.ThinkingConfigDisabledParam{},
+		}
 	case effort.budgetTokens() > 0:
 		budget := effort.budgetTokens()
 		// Anthropic requires budget_tokens < max_tokens with room for the

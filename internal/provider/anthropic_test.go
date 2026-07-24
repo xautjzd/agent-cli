@@ -145,8 +145,12 @@ func TestAnthropicThinkingOff(t *testing.T) {
 	newAnthropic(t, srv, "off").Chat(context.Background(), Request{
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
-	if _, present := stub.body["thinking"]; present {
-		t.Errorf("thinking should be omitted when off: %#v", stub.body["thinking"])
+	// "off" sends an explicit disabled block rather than omitting the field, so
+	// Anthropic-compatible gateways (e.g. GLM) that default thinking on still
+	// honor it.
+	thinking, ok := stub.body["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Errorf("thinking should be explicitly disabled when off: %#v", stub.body["thinking"])
 	}
 	// The model default is applied when the request names none.
 	if stub.body["model"] != defaultAnthropicModel {
