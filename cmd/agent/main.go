@@ -442,10 +442,6 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	// The REPL adapts the hook runner to the agent's PreToolUse/PostToolUse
 	// extension points.
 	ag.Hooks = r
-	if sbox.Available() {
-		th := theme.Current()
-		fmt.Fprintf(os.Stderr, "%s\n", th.Paint(th.Muted, "● sandbox: "+sbox.Reason()))
-	}
 	// The REPL is the permission gate: dangerous tool calls are confirmed
 	// (HITL) or audit-logged (bypass) before execution — for the main agent
 	// and, through the spawner, for subagents too.
