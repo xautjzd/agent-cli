@@ -154,6 +154,47 @@ func TestAnthropicThinkingOff(t *testing.T) {
 	}
 }
 
+func TestAnthropicThinkingEffortBudget(t *testing.T) {
+	stub := &anthropicStub{reply: textReply}
+	srv := stub.server(t)
+	defer srv.Close()
+
+	// A graduated effort level requests an enabled thinking budget that stays
+	// strictly below max_tokens (capped to leave room for the answer).
+	newAnthropic(t, srv, "high").Chat(context.Background(), Request{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	thinking, ok := stub.body["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "enabled" {
+		t.Fatalf("thinking config = %#v, want enabled", stub.body["thinking"])
+	}
+	budget, _ := thinking["budget_tokens"].(float64)
+	mt, _ := stub.body["max_tokens"].(float64)
+	if budget <= 0 || budget >= mt {
+		t.Errorf("budget_tokens %v must be positive and below max_tokens %v", budget, mt)
+	}
+	if budget > float64(EffortHigh.budgetTokens()) {
+		t.Errorf("budget_tokens %v exceeds the level's budget %d", budget, EffortHigh.budgetTokens())
+	}
+}
+
+func TestAnthropicThinkingAdaptiveAliases(t *testing.T) {
+	// Empty, "on", and "adaptive" all mean adaptive thinking.
+	for _, level := range []string{"", "on", "adaptive"} {
+		stub := &anthropicStub{reply: textReply}
+		srv := stub.server(t)
+
+		newAnthropic(t, srv, level).Chat(context.Background(), Request{
+			Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		})
+		thinking, ok := stub.body["thinking"].(map[string]any)
+		if !ok || thinking["type"] != "adaptive" {
+			t.Errorf("level %q: thinking = %#v, want adaptive", level, stub.body["thinking"])
+		}
+		srv.Close()
+	}
+}
+
 func TestAnthropicToolDefinitionShape(t *testing.T) {
 	stub := &anthropicStub{reply: textReply}
 	srv := stub.server(t)

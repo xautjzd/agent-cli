@@ -68,13 +68,14 @@ func TestConfigPanelThinkingToggle(t *testing.T) {
 	m := newConfigPanel(t)
 	m.find(t, "thinking")
 
-	m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	if m.repl.Cfg.Thinking != "off" {
-		t.Errorf("thinking toggle = %q, want off", m.repl.Cfg.Thinking)
-	}
-	m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	if m.repl.Cfg.Thinking != "adaptive" {
-		t.Errorf("thinking toggle back = %q, want adaptive", m.repl.Cfg.Thinking)
+	// The effort ladder cycles off → low → medium → high → adaptive → off.
+	// Starting from the default (adaptive), the first toggle lands on off.
+	want := []string{"off", "low", "medium", "high", "adaptive"}
+	for _, w := range want {
+		m.Update(tea.KeyMsg{Type: tea.KeySpace})
+		if m.repl.Cfg.Thinking != w {
+			t.Fatalf("thinking toggle = %q, want %q", m.repl.Cfg.Thinking, w)
+		}
 	}
 }
 

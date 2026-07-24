@@ -41,6 +41,15 @@ const (
 	defaultAnthropicStreamMaxTokens = 64000
 )
 
+// answerReserveTokens is the headroom kept for the visible answer above a
+// thinking budget, so the budget stays comfortably below max_tokens (Anthropic
+// rejects a budget that is not strictly below max_tokens). minThinkingBudget is
+// Anthropic's floor: a budget below it cannot enable thinking.
+const (
+	answerReserveTokens = 4096
+	minThinkingBudget   = 1024
+)
+
 func init() {
 	Register("anthropic", func(cfg Config) (Provider, error) {
 		return NewAnthropic("anthropic", cfg)
@@ -192,9 +201,28 @@ func (p *anthropicProvider) buildParams(req Request, defaultMaxTokens int) (*ant
 	if system != "" {
 		params.System = []anthropic.TextBlockParam{{Text: system}}
 	}
-	// Adaptive thinking must be requested explicitly; summarized display
-	// makes the reasoning visible to the existing thinking renderer.
-	if !strings.EqualFold(p.thinking, "off") {
+	// Thinking is driven by the effort level: a fixed budget for low/medium/
+	// high, model-chosen budget for adaptive, and omitted for off. Summarized
+	// display makes the reasoning visible to the existing thinking renderer.
+	effort, _ := ParseEffort(p.thinking)
+	switch {
+	case effort == EffortOff:
+		// Leave the union zero so the request carries no thinking field.
+	case effort.budgetTokens() > 0:
+		budget := effort.budgetTokens()
+		// Anthropic requires budget_tokens < max_tokens with room for the
+		// answer. Rather than raise max_tokens — which can trip the SDK's
+		// "streaming required" guard on the blocking path — cap the budget to
+		// the available headroom. The streaming path (large max_tokens) keeps
+		// the full budget; internal blocking calls get a smaller one.
+		if ceiling := int(params.MaxTokens) - answerReserveTokens; budget > ceiling {
+			budget = ceiling
+		}
+		// Below Anthropic's 1024 minimum there is no room to think at all.
+		if budget >= minThinkingBudget {
+			params.Thinking = anthropic.ThinkingConfigParamOfEnabled(int64(budget))
+		}
+	default: // adaptive
 		params.Thinking = anthropic.ThinkingConfigParamUnion{
 			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{
 				Display: anthropic.ThinkingConfigAdaptiveDisplaySummarized,

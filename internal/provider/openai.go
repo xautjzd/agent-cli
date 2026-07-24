@@ -21,6 +21,11 @@ type openAICompatible struct {
 	apiKey  string
 	baseURL string
 	client  *http.Client
+	// reasoningEffort is the reasoning_effort value ("low"/"medium"/"high") to
+	// send, or "" to omit it. It is only ever non-empty when the user opts into
+	// a graduated effort level, keeping the parameter off requests to models
+	// that do not accept it.
+	reasoningEffort string
 }
 
 // Vendor defaults. Users can always override BaseURL to point at any
@@ -65,10 +70,12 @@ func newOpenAICompatible(name, defaultBase string, cfg Config) (Provider, error)
 	if base == "" {
 		base = defaultBase
 	}
+	effort, _ := ParseEffort(cfg.Thinking)
 	return &openAICompatible{
-		name:    name,
-		apiKey:  cfg.APIKey,
-		baseURL: base,
+		name:            name,
+		apiKey:          cfg.APIKey,
+		baseURL:         base,
+		reasoningEffort: effort.reasoningEffort(),
 		// Agent turns can be slow on long completions; generous timeout.
 		client: &http.Client{Timeout: 5 * time.Minute},
 	}, nil
@@ -80,12 +87,13 @@ func (p *openAICompatible) Name() string { return p.name }
 // rest of the codebase never sees vendor JSON shapes (ISP: callers only see
 // the small Provider interface).
 type chatRequest struct {
-	Model         string         `json:"model"`
-	Messages      []wireMessage  `json:"messages"`
-	Tools         []wireTool     `json:"tools,omitempty"`
-	MaxTokens     int            `json:"max_tokens,omitempty"`
-	Stream        bool           `json:"stream,omitempty"`
-	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []wireMessage  `json:"messages"`
+	Tools           []wireTool     `json:"tools,omitempty"`
+	MaxTokens       int            `json:"max_tokens,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+	Stream          bool           `json:"stream,omitempty"`
+	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
 }
 
 // streamOptions requests a final usage chunk on streamed completions
@@ -138,9 +146,10 @@ type chatResponse struct {
 // back into a Response the agent loop can act on.
 func (p *openAICompatible) Chat(ctx context.Context, req Request) (*Response, error) {
 	wire := chatRequest{
-		Model:     req.Model,
-		Messages:  toWireMessages(req.Messages),
-		MaxTokens: req.MaxTokens,
+		Model:           req.Model,
+		Messages:        toWireMessages(req.Messages),
+		MaxTokens:       req.MaxTokens,
+		ReasoningEffort: p.reasoningEffort,
 	}
 	for _, t := range req.Tools {
 		wire.Tools = append(wire.Tools, wireTool{Type: "function", Function: t})
@@ -228,11 +237,12 @@ type streamChunk struct {
 // indistinguishable from a blocking Chat result.
 func (p *openAICompatible) ChatStream(ctx context.Context, req Request, onDelta func(Delta)) (*Response, error) {
 	wire := chatRequest{
-		Model:         req.Model,
-		Messages:      toWireMessages(req.Messages),
-		MaxTokens:     req.MaxTokens,
-		Stream:        true,
-		StreamOptions: &streamOptions{IncludeUsage: true},
+		Model:           req.Model,
+		Messages:        toWireMessages(req.Messages),
+		MaxTokens:       req.MaxTokens,
+		ReasoningEffort: p.reasoningEffort,
+		Stream:          true,
+		StreamOptions:   &streamOptions{IncludeUsage: true},
 	}
 	for _, t := range req.Tools {
 		wire.Tools = append(wire.Tools, wireTool{Type: "function", Function: t})

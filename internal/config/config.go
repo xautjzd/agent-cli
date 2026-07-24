@@ -77,8 +77,10 @@ type Config struct {
 	SandboxDenyNetwork bool `json:"sandbox_deny_network,omitempty"`
 	// GoalMaxRounds caps /goal work-check rounds per trigger (default 8).
 	GoalMaxRounds int `json:"goal_max_rounds,omitempty"`
-	// Thinking controls extended thinking on providers that support it
-	// (Anthropic): "off" disables it; empty uses the provider default.
+	// Thinking is the reasoning-effort level for providers that support it:
+	// "off", "low", "medium", "high", or "adaptive" (empty uses the default,
+	// adaptive). Anthropic maps it to a thinking budget; OpenAI-compatible
+	// backends map it to reasoning_effort. Set via the /effort command.
 	Thinking string `json:"thinking,omitempty"`
 	// PromptCache controls Anthropic prompt caching: "off" disables the
 	// cache_control breakpoints; empty leaves them on (the default). Set it
@@ -709,8 +711,8 @@ var validKeys = map[string]func(string) error{
 		return nil
 	},
 	"thinking": func(v string) error {
-		if v != "off" && v != "adaptive" {
-			return fmt.Errorf("must be adaptive or off, got %q", v)
+		if _, ok := provider.ParseEffort(v); !ok {
+			return fmt.Errorf("must be one of off, low, medium, high, adaptive, got %q", v)
 		}
 		return nil
 	},

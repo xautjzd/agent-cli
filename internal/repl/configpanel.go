@@ -38,7 +38,7 @@ var configSettings = []setting{
 	{"model", "Model", kindText, nil},
 	{"api_key", "API key", kindSecret, nil},
 	{"base_url", "Base URL", kindText, nil},
-	{"thinking", "Extended thinking", kindEnum, []string{"adaptive", "off"}},
+	{"thinking", "Reasoning effort", kindEnum, []string{"off", "low", "medium", "high", "adaptive"}},
 	{"permission_mode", "Permission mode", kindEnum, []string{"hitl", "bypass"}},
 	{"bash_policy", "Bash risk posture", kindEnum, []string{"standard", "strict"}},
 	{"sandbox", "Command sandbox", kindEnum, []string{"off", "auto", "on"}},

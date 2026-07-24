@@ -170,40 +170,51 @@ type command struct {
 	handler func(r *Repl, ctx context.Context, args string) error
 }
 
-// commands is the ordered built-in command table. Adding a command is a pure
-// addition to this slice (OCP). It is populated in init because cmdHelp
-// itself iterates the table, which Go's initializer cycle check rejects for
-// a plain composite literal.
+// commands is the built-in command table, ordered by how often a command is
+// reached for and how central it is to a session — the everyday model/effort/
+// mode controls and context management come first, informational listings and
+// integrations after, with session housekeeping last. Help, completion, and
+// the picker all present commands in this order, so the ranking is the primary
+// discovery aid. Adding a command is a near-pure addition (OCP): insert it at
+// the right priority. It is populated in init because cmdHelp itself iterates
+// the table, which Go's initializer cycle check rejects for a plain composite
+// literal.
 var commands []command
 
 func init() {
 	commands = []command{
+		// Everyday session controls: model, reasoning, safety, planning.
 		{"help", "/help", "List commands and installed skills", (*Repl).cmdHelp},
 		{"model", "/model [name]", "Show or switch the model", (*Repl).cmdModel},
 		{"provider", "/provider <name> [model]", "Switch provider (anthropic, openai, deepseek, custom)", (*Repl).cmdProvider},
-		{"skills", "/skills", "List installed skills (run one with /<skill-name> [task])", (*Repl).cmdSkills},
-		{"commands", "/commands", "List user-defined slash commands (run one with /<name> [args])", (*Repl).cmdCommands},
-		{"tools", "/tools", "List available tools", (*Repl).cmdTools},
-		{"todos", "/todos", "Show the agent's current task list (todo_write)", (*Repl).cmdTodos},
-		{"mcp", "/mcp", "List connected MCP servers and their tools", (*Repl).cmdMCP},
-		{"lsp", "/lsp", "List language servers backing the code-navigation tools", (*Repl).cmdLSP},
-		{"agents", "/agents", "List subagent types the task tool can delegate to", (*Repl).cmdAgents},
-		{"hooks", "/hooks", "List configured lifecycle hooks (third-party integration)", (*Repl).cmdHooks},
-		{"config", "/config [set k v]", "Open the settings panel (view + edit); or set one value", (*Repl).cmdConfig},
-		{"theme", "/theme [name]", "Switch the color theme (dark, light, dracula, …)", (*Repl).cmdTheme},
-		{"memory", "/memory", "List saved project memories", (*Repl).cmdMemory},
-		{"goal", "/goal [text|clear]", "Set a session goal the agent works toward until met", (*Repl).cmdGoal},
-		{"plan", "/plan [task|off]", "Plan mode: explore read-only, propose a plan, implement on approval", (*Repl).cmdPlan},
+		{"effort", "/effort [off|low|medium|high|adaptive]", "Set reasoning-effort (extended thinking) level", (*Repl).cmdEffort},
 		{"mode", "/mode [hitl|bypass]", "Show or switch the permission mode for dangerous operations", (*Repl).cmdMode},
-		{"usage", "/usage", "Show token usage, timing, and context occupancy", (*Repl).cmdUsage},
-		{"stats", "/stats", "Activity overview: heatmap, streaks, sessions, favorite model", (*Repl).cmdStats},
-		{"rename", "/rename [title]", "Rename the current session", (*Repl).cmdRename},
+		{"plan", "/plan [task|off]", "Plan mode: explore read-only, propose a plan, implement on approval", (*Repl).cmdPlan},
+		// Context and session lifecycle management.
+		{"compact", "/compact", "Summarize earlier turns to free up context now", (*Repl).cmdCompact},
+		{"clear", "/clear", "Clear conversation history (keeps system prompt)", (*Repl).cmdClear},
 		{"new", "/new", "Start a new session (current one stays resumable)", (*Repl).cmdNew},
 		{"resume", "/resume [id]", "Resume a previous session in this project", (*Repl).cmdResume},
 		{"rewind", "/rewind", "Undo to a checkpoint: restore files and conversation to before an earlier message", (*Repl).cmdRewind},
-		{"compact", "/compact", "Summarize earlier turns to free up context now", (*Repl).cmdCompact},
+		// Inspection and configuration.
+		{"usage", "/usage", "Show token usage, timing, and context occupancy", (*Repl).cmdUsage},
+		{"config", "/config [set k v]", "Open the settings panel (view + edit); or set one value", (*Repl).cmdConfig},
+		{"memory", "/memory", "List saved project memories", (*Repl).cmdMemory},
+		{"goal", "/goal [text|clear]", "Set a session goal the agent works toward until met", (*Repl).cmdGoal},
+		{"tools", "/tools", "List available tools", (*Repl).cmdTools},
+		{"skills", "/skills", "List installed skills (run one with /<skill-name> [task])", (*Repl).cmdSkills},
+		{"commands", "/commands", "List user-defined slash commands (run one with /<name> [args])", (*Repl).cmdCommands},
+		{"todos", "/todos", "Show the agent's current task list (todo_write)", (*Repl).cmdTodos},
+		// External integrations and capabilities.
+		{"agents", "/agents", "List subagent types the task tool can delegate to", (*Repl).cmdAgents},
+		{"mcp", "/mcp", "List connected MCP servers and their tools", (*Repl).cmdMCP},
+		{"lsp", "/lsp", "List language servers backing the code-navigation tools", (*Repl).cmdLSP},
+		{"hooks", "/hooks", "List configured lifecycle hooks (third-party integration)", (*Repl).cmdHooks},
+		// Appearance, stats, and housekeeping.
+		{"theme", "/theme [name]", "Switch the color theme (dark, light, dracula, …)", (*Repl).cmdTheme},
+		{"stats", "/stats", "Activity overview: heatmap, streaks, sessions, favorite model", (*Repl).cmdStats},
+		{"rename", "/rename [title]", "Rename the current session", (*Repl).cmdRename},
 		{"copy", "/copy", "Copy the session transcript to the system clipboard", (*Repl).cmdCopy},
-		{"clear", "/clear", "Clear conversation history (keeps system prompt)", (*Repl).cmdClear},
 		{"exit", "/exit", "Quit the session", (*Repl).cmdExit},
 	}
 }

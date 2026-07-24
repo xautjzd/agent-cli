@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/xautjzd/agent-cli/internal/catalog"
+	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
@@ -212,6 +213,10 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 			[2]string{"hitl", "dangerous operations require confirmation (default)"},
 			[2]string{"bypass", "no confirmations; dangerous operations are audit-logged"},
 		)
+	case "effort":
+		for _, e := range provider.Efforts() {
+			options = append(options, [2]string{string(e), e.Describe()})
+		}
 	default:
 		return nil
 	}

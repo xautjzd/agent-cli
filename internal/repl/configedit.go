@@ -8,6 +8,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/permission"
+	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
@@ -263,10 +264,11 @@ func (r *Repl) applyLive(ctx context.Context, key, value string) error {
 		r.GoalMaxRounds = n
 		return nil
 	case "thinking":
-		if value != "adaptive" && value != "off" {
-			return fmt.Errorf("thinking must be adaptive or off")
+		effort, ok := provider.ParseEffort(value)
+		if !ok {
+			return fmt.Errorf("thinking must be one of off, low, medium, high, adaptive")
 		}
-		r.Cfg.Thinking = value
+		r.Cfg.Thinking = string(effort)
 		// Rebuild so the change takes effect now; ignore a rebuild error
 		// (e.g. no credential yet) — the field is set and applies on the
 		// next provider build regardless.
