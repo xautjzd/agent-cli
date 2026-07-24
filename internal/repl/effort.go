@@ -23,11 +23,16 @@ func (r *Repl) cmdEffort(_ context.Context, args string) error {
 		th := theme.Current()
 		fmt.Fprintf(r.Out, "reasoning effort: %s\n", th.Paint(th.Accent, string(current)))
 		for _, e := range provider.Efforts() {
-			marker := "  "
+			// Render the active level as a full accent-colored row tagged
+			// "(current)" so the persisted choice is unmistakable, rather than
+			// leaning on a subtle arrow the "(default)" note on adaptive can
+			// overshadow.
 			if e == current {
-				marker = th.Paint(th.Accent, "▸ ")
+				row := fmt.Sprintf("❯ %-9s %s  (current)", e, e.Describe())
+				fmt.Fprintln(r.Out, th.Paint(th.Accent, row))
+				continue
 			}
-			fmt.Fprintf(r.Out, "%s%-9s %s\n", marker, e, e.Describe())
+			fmt.Fprintf(r.Out, "  %-9s %s\n", e, th.Paint(th.Muted, e.Describe()))
 		}
 		return nil
 	}
