@@ -19,6 +19,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/provider"
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // ProviderConfig is one named provider profile, e.g.
@@ -124,6 +125,9 @@ type Config struct {
 	Prices map[string]PriceConfig `json:"prices,omitempty"`
 	// WebSearch selects the backend for the web_search tool.
 	WebSearch WebSearchConfig `json:"web_search,omitempty"`
+	// Theme names the color theme the interactive UI renders with (see the
+	// theme package: dark, light, dracula, …). Empty uses the default.
+	Theme string `json:"theme,omitempty"`
 }
 
 // WebSearchConfig selects the web-search backend. Provider is "duckduckgo"
@@ -320,6 +324,9 @@ func LoadIn(projectDir string) (*Config, error) {
 	if cfg.ContextLimit <= 0 {
 		cfg.ContextLimit = DefaultContextLimit
 	}
+	if cfg.Theme == "" {
+		cfg.Theme = theme.Default()
+	}
 	return cfg, nil
 }
 
@@ -390,6 +397,9 @@ func mergeFile(cfg *Config, path string) error {
 	}
 	if layer.AutoCompact != "" {
 		cfg.AutoCompact = layer.AutoCompact
+	}
+	if layer.Theme != "" {
+		cfg.Theme = layer.Theme
 	}
 	if layer.ContextLimit > 0 {
 		cfg.ContextLimit = layer.ContextLimit
@@ -704,11 +714,17 @@ var validKeys = map[string]func(string) error{
 		}
 		return nil
 	},
+	"theme": func(v string) error {
+		if !theme.Has(v) {
+			return fmt.Errorf("unknown theme %q; choose one of %s", v, strings.Join(theme.Names(), ", "))
+		}
+		return nil
+	},
 }
 
 // Keys returns the settable configuration keys in display order.
 func Keys() []string {
-	return []string{"provider", "model", "api_key", "base_url", "max_turns", "permission_mode", "goal_max_rounds", "vision_provider", "vision_model", "thinking", "auto_compact", "context_limit", "bash_policy", "sandbox"}
+	return []string{"provider", "model", "api_key", "base_url", "max_turns", "permission_mode", "goal_max_rounds", "vision_provider", "vision_model", "thinking", "auto_compact", "context_limit", "bash_policy", "sandbox", "theme"}
 }
 
 // Set persists one field to the global config file (backwards-compatible
@@ -770,6 +786,8 @@ func SetScoped(scope Scope, projectDir, key, value string) error {
 		cfg.BashPolicy = value
 	case "sandbox":
 		cfg.Sandbox = value
+	case "theme":
+		cfg.Theme = value
 	}
 	return cfg.saveTo(path)
 }

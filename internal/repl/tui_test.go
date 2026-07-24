@@ -156,6 +156,39 @@ func TestTUISelectOverlayArrowPick(t *testing.T) {
 	}
 }
 
+// A selection overlay with a preview callback fires it for the highlighted
+// item on open and on every move — the mechanism behind /theme's live preview.
+func TestTUISelectPreviewFires(t *testing.T) {
+	m := newTestTUI(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	var previewed []int
+	reply := make(chan pickReply, 1)
+	items := []pickerItem{
+		{label: "a", filterText: "a"},
+		{label: "b", filterText: "b"},
+		{label: "c", filterText: "c"},
+	}
+	m.Update(selectMsg{title: "Pick", items: items, reply: reply,
+		preview: func(i int) { previewed = append(previewed, i) }})
+
+	// Preview fired once for the initially highlighted item (index 0).
+	if len(previewed) != 1 || previewed[0] != 0 {
+		t.Fatalf("open preview = %v, want [0]", previewed)
+	}
+	// Down → preview 1, Down → preview 2.
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if got := previewed[len(previewed)-1]; got != 2 {
+		t.Errorf("last preview = %d, want 2 (from %v)", got, previewed)
+	}
+	// Enter delivers the previewed index.
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := <-reply; !got.ok || got.idx != 2 {
+		t.Errorf("pick = %+v, want idx 2", got)
+	}
+}
+
 func TestTUIEnterRunsSelectedCommand(t *testing.T) {
 	m := newTestTUI(t)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

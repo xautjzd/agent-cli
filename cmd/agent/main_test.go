@@ -1,10 +1,23 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/muesli/termenv"
+
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
+
+// TestMain forces a 16-color profile so the terminal renderer emits ANSI
+// sequences the color-assertion tests can check (a plain test buffer would
+// otherwise auto-detect no-color).
+func TestMain(m *testing.M) {
+	theme.SetColorProfile(termenv.ANSI)
+	os.Exit(m.Run())
+}
 
 func TestStreamRendering(t *testing.T) {
 	var buf strings.Builder
@@ -24,7 +37,7 @@ func TestStreamRendering(t *testing.T) {
 		t.Errorf("text stream wrong:\n%q", out)
 	}
 	// Thinking styling is closed before the answer begins.
-	if strings.Index(out, "second"+ansiReset) > strings.Index(out, "Hello") {
+	if strings.Index(out, "second"+theme.Current().Reset) > strings.Index(out, "Hello") {
 		t.Errorf("style not reset before answer:\n%q", out)
 	}
 	if !strings.HasSuffix(out, "\n") {
@@ -62,10 +75,10 @@ func TestDiffDetectionAndColorization(t *testing.T) {
 		}
 	}
 	// Removals render red, additions green.
-	if !strings.Contains(out, ansiRed+"    2 - old line") {
+	if !strings.Contains(out, theme.Current().Error+"    2 - old line") {
 		t.Errorf("removal not red:\n%q", out)
 	}
-	if !strings.Contains(out, ansiGreen+"    2 + new line") {
+	if !strings.Contains(out, theme.Current().Success+"    2 + new line") {
 		t.Errorf("addition not green:\n%q", out)
 	}
 

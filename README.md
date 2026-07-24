@@ -26,6 +26,8 @@ memory.
 - **Interactive session** — Claude Code–style `/` slash commands (switch model/provider
   mid-session, run skills explicitly, inspect config/memory/tools) and `@path` file
   references that inline file contents into your prompt.
+- **Themes** — several built-in color themes (`dark`, `light`, `monochrome`, `daltonized`,
+  `dracula`, `tokyonight`, …), switchable live with `/theme` (re-colors the whole session).
 
 ## Installation
 
@@ -173,6 +175,7 @@ picker instead. Commands:
 | `/agents` | List subagent types the `task` tool can delegate to |
 | `/hooks` | List configured lifecycle hooks (third-party integration) |
 | `/config` | Open the settings panel (view + edit combined) |
+| `/theme [name]` | Switch the color theme (`/theme` opens a picker; `/theme dracula` sets one directly) |
 | `/memory` | List saved project memories |
 | `/goal <text>` | Set a session goal the agent keeps working toward until met (`/goal` shows it, `/goal clear` drops it) |
 | `/plan [task]` | Plan mode: explore read-only, propose a plan, implement on approval (`/plan off` exits) |
@@ -337,6 +340,29 @@ editable live in `/config`:
 
 ```jsonc
 { "auto_compact": "on", "context_limit": 200000 }
+```
+
+### Themes
+
+The interactive UI ships with several built-in color themes. `/theme` opens a picker (arrow
+keys, current theme marked) that **previews each theme live** as you scroll — the whole
+transcript recolors in real time, **Enter** keeps the highlighted one, **Esc** reverts.
+`/theme <name>` switches directly. The choice persists to the global config.
+
+| Theme | Notes |
+| --- | --- |
+| `dark` (default), `light` | Use the terminal's own ANSI palette, so they track your terminal color scheme |
+| `monochrome` | No colors — faint/italic attributes only (accessibility) |
+| `daltonized` | Colorblind-friendly (blue for success, orange for error) |
+| `dracula`, `tokyonight`, `catppuccin`, `gruvbox`, `nord`, `solarized` | Fixed true-color schemes |
+
+Colors are semantic roles (accent, success, error, warning, muted, …) resolved through the
+terminal's detected capability: true-color hex degrades to 256- or 16-color automatically,
+and color is dropped entirely under `NO_COLOR` or when output is piped. Set it in config or
+live in `/config`:
+
+```jsonc
+{ "theme": "dracula" }
 ```
 
 ### Permission modes
@@ -764,7 +790,8 @@ agent config set permission_mode bypass project   # persist to <project>/.agent/
 
 All edits apply to the running session immediately — changing `api_key`/`base_url`
 rebuilds the provider client on the spot, `max_turns`/`goal_max_rounds`/`permission_mode`
-take effect on the next turn, and invalid values are rejected before anything is written.
+take effect on the next turn, `theme` re-colors the session immediately, and invalid values
+are rejected before anything is written.
 
 ### MCP servers
 

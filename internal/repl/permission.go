@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/xautjzd/agent-cli/internal/permission"
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // BeforeToolCall implements agent.Gate: the permission layer between the
@@ -48,7 +49,8 @@ func (r *Repl) BeforeToolCall(name, args string) (bool, string) {
 
 	// A hard deny rule blocks in every mode.
 	if decision.Action == permission.ActionDeny {
-		fmt.Fprintf(r.Out, "\n\033[31m⛔ Denied by policy: %s — %s\033[0m\n", name, decision.Reason)
+		th := theme.Current()
+		fmt.Fprintf(r.Out, "\n%s\n", th.Paint(th.Error, fmt.Sprintf("⛔ Denied by policy: %s — %s", name, decision.Reason)))
 		rec.Decision, rec.Approved = permission.ActionDeny, false
 		r.audit(rec)
 		return false, ""
@@ -65,7 +67,8 @@ func (r *Repl) BeforeToolCall(name, args string) (bool, string) {
 	// From here the action is Ask. In bypass mode, auto-approve with a
 	// structured audit note carried into the conversation context.
 	if mode == permission.ModeBypass {
-		fmt.Fprintf(r.Out, "\n\033[33m⚠ bypass: auto-approved %s — %s\033[0m\n", name, decision.Reason)
+		th := theme.Current()
+		fmt.Fprintf(r.Out, "\n%s\n", th.Paint(th.Warning, fmt.Sprintf("⚠ bypass: auto-approved %s — %s", name, decision.Reason)))
 		rec.Decision, rec.Approved = permission.ActionAllow, true
 		r.audit(rec)
 		return true, rec.Note()
@@ -83,8 +86,9 @@ func (r *Repl) BeforeToolCall(name, args string) (bool, string) {
 	}
 
 	// HITL: show the details (and a diff preview for file edits), then prompt.
-	fmt.Fprintf(r.Out, "\n\033[33m⚠ Approval required\033[0m\n  tool: %s\n  reason: %s\n",
-		name, decision.Reason)
+	th := theme.Current()
+	fmt.Fprintf(r.Out, "\n%s\n  tool: %s\n  reason: %s\n",
+		th.Paint(th.Warning, "⚠ Approval required"), name, decision.Reason)
 	if preview := r.editPreview(name, args); preview != "" {
 		fmt.Fprint(r.Out, preview)
 	} else {

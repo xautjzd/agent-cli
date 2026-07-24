@@ -14,6 +14,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/provider"
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // Multimodal input support: images pasted with Ctrl+V (or referenced with
@@ -104,7 +105,8 @@ func (r *Repl) prepareImageMessage(ctx context.Context, msg provider.Message) (p
 	if err != nil {
 		return provider.Message{}, fmt.Errorf("vision fallback: %w", err)
 	}
-	fmt.Fprintf(r.Out, "\033[2m🖼 %s has no vision — describing image(s) with %s…\033[0m\n", r.Cfg.Model, visionModel)
+	th := theme.Current()
+	fmt.Fprintf(r.Out, "%s\n", th.Paint(th.Muted, fmt.Sprintf("🖼 %s has no vision — describing image(s) with %s…", r.Cfg.Model, visionModel)))
 
 	resp, err := visionProv.Chat(ctx, provider.Request{
 		Model: visionModel,

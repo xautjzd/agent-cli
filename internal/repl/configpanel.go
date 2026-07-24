@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/xautjzd/agent-cli/internal/textwidth"
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // settingKind decides how a row is edited.
@@ -47,6 +48,7 @@ var configSettings = []setting{
 	{"goal_max_rounds", "Goal check rounds", kindInt, nil},
 	{"vision_provider", "Vision fallback provider", kindText, nil},
 	{"vision_model", "Vision fallback model", kindText, nil},
+	{"theme", "Color theme", kindEnum, theme.Names()},
 }
 
 // configModel is the bubbletea model for the interactive settings panel,

@@ -32,6 +32,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/skill"
 	"github.com/xautjzd/agent-cli/internal/subagent"
 	"github.com/xautjzd/agent-cli/internal/textwidth"
+	"github.com/xautjzd/agent-cli/internal/theme"
 	"github.com/xautjzd/agent-cli/internal/tool"
 	"github.com/xautjzd/agent-cli/internal/usage"
 )
@@ -88,6 +89,9 @@ type Repl struct {
 	// inside the running program (used by /resume, /config) and returns the
 	// chosen index, so lists are picked with ↑/↓ rather than a typed number.
 	tuiSelect func(title string, items []pickerItem) (int, bool)
+	// tuiSelectPreview is tuiSelect with a live-preview callback fired as the
+	// highlight moves (used by /theme to recolor the UI as you scroll).
+	tuiSelectPreview func(title string, items []pickerItem, preview func(int)) (int, bool)
 
 	// Policy decides approval for tool calls (rules + risk classifier); nil
 	// lazily builds a default. Audit records every gated decision as
@@ -111,6 +115,9 @@ type Repl struct {
 
 	scanner *bufio.Scanner
 	useTUI  bool
+	// sb is the active full-screen scrollback while the TUI runs (nil in the
+	// plain/piped path); /theme resets and replays it to re-color the session.
+	sb      *scrollback
 	current *session.Session
 	// pendingTitle holds a title chosen with /rename before the session
 	// file exists, so naming a session up front survives its creation.
@@ -177,6 +184,7 @@ func init() {
 		{"agents", "/agents", "List subagent types the task tool can delegate to", (*Repl).cmdAgents},
 		{"hooks", "/hooks", "List configured lifecycle hooks (third-party integration)", (*Repl).cmdHooks},
 		{"config", "/config [set k v]", "Open the settings panel (view + edit); or set one value", (*Repl).cmdConfig},
+		{"theme", "/theme [name]", "Switch the color theme (dark, light, dracula, …)", (*Repl).cmdTheme},
 		{"memory", "/memory", "List saved project memories", (*Repl).cmdMemory},
 		{"goal", "/goal [text|clear]", "Set a session goal the agent works toward until met", (*Repl).cmdGoal},
 		{"plan", "/plan [task|off]", "Plan mode: explore read-only, propose a plan, implement on approval", (*Repl).cmdPlan},
@@ -398,13 +406,20 @@ func (r *Repl) syncSession() {
 	r.current.Provider = r.Cfg.Provider
 	r.current.Model = r.Cfg.Model
 	r.current.Goal = r.goal
+	r.current.Messages = r.buildRecords()
+	if err := r.Sessions.Save(r.current); err != nil {
+		fmt.Fprintln(r.Out, "warning: session not saved:", err)
+	}
+}
 
-	// System prompt excluded: it is rebuilt on resume. Real user records carry
-	// the raw typed input for replay. Compaction can inject a synthetic
-	// summary user turn and drop older real turns from the front, so the
-	// surviving real user turns are the most recent ones — align them to the
-	// tail of rawInputs (last N), and give a summary turn no Display so it
-	// replays as its own compaction notice.
+// buildRecords converts the live conversation into persistable/replayable
+// records: the system prompt is excluded (rebuilt on resume) and each real user
+// turn carries the raw typed input for faithful replay. Compaction can inject a
+// synthetic summary user turn and drop older real turns from the front, so the
+// surviving real user turns are the most recent ones — align them to the tail
+// of rawInputs (last N), and give a summary turn no Display so it replays as its
+// own compaction notice.
+func (r *Repl) buildRecords() []session.Record {
 	msgs := r.Agent.History()[1:]
 	realUsers := 0
 	for _, m := range msgs {
@@ -427,10 +442,7 @@ func (r *Repl) syncSession() {
 			userIdx++
 		}
 	}
-	r.current.Messages = records
-	if err := r.Sessions.Save(r.current); err != nil {
-		fmt.Fprintln(r.Out, "warning: session not saved:", err)
-	}
+	return records
 }
 
 // dispatch routes one "/..." line: bare slash → picker, built-in command,
@@ -1265,12 +1277,12 @@ func (r *Repl) cmdCompact(ctx context.Context, _ string) error {
 type usageRow struct{ name, tok, in, out, cost string }
 
 func (r *Repl) cmdUsage(_ context.Context, _ string) error {
-	const (
-		bold  = "\033[1m"
-		dim   = "\033[2m"
-		reset = "\033[0m"
-		cyan  = "\033[36m"
-	)
+	th := theme.Current()
+	dim, reset, cyan := th.Muted, th.Reset, th.Accent
+	bold := ""
+	if reset != "" {
+		bold = "\033[1m"
+	}
 	rec := r.Agent.Usage
 
 	if rec != nil {
@@ -1331,7 +1343,8 @@ func (r *Repl) cmdUsage(_ context.Context, _ string) error {
 //
 //	<name>   <tok> tok   <in> → <out>   <cost>
 func (r *Repl) printUsageTable(title string, rows []usageRow) {
-	const dim, reset = "\033[2m", "\033[0m"
+	th := theme.Current()
+	dim, reset := th.Muted, th.Reset
 	if len(rows) == 0 {
 		return
 	}

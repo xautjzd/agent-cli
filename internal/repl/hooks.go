@@ -7,6 +7,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/agent"
 	"github.com/xautjzd/agent-cli/internal/hook"
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // Hook integration. The REPL owns the hook.Runner and adapts it to the two
@@ -84,8 +85,9 @@ func (r *Repl) fireLifecycle(ctx context.Context, event hook.Event, message stri
 
 // showHookMessages prints any user-facing messages a hook emitted.
 func (r *Repl) showHookMessages(out hook.Outcome) {
+	th := theme.Current()
 	for _, m := range out.Messages {
-		fmt.Fprintf(r.Out, "\033[2m🪝 %s\033[0m\n", m)
+		fmt.Fprintf(r.Out, "%s\n", th.Paint(th.Muted, "🪝 "+m))
 	}
 }
 

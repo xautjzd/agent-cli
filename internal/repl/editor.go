@@ -8,23 +8,43 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/xautjzd/agent-cli/internal/textwidth"
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // Popup styling. Kept subtle so the editor reads like a shell, not a form.
+// The color-bearing styles (input box border, ❯ marker) are (re)built from the
+// active theme by applyThemeStyles; the attribute-only ones are theme-neutral.
 var (
 	styleSelected = lipgloss.NewStyle().Reverse(true)
 	styleDesc     = lipgloss.NewStyle().Faint(true)
 	styleHint     = lipgloss.NewStyle().Faint(true)
 	// styleInputBox frames the pending input, clearly separating what is
 	// being typed from the scrollback above (Claude Code-style).
-	styleInputBox = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("8")).
-			Padding(0, 1)
+	styleInputBox = inputBoxStyle(theme.Current())
 	// styleMarker renders the collapsed "❯" marker a submitted line keeps
 	// in scrollback.
-	styleMarker = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	styleMarker = lipgloss.NewStyle().Foreground(theme.Current().AccentColor())
 )
+
+// inputBoxStyle builds the input-frame style for a theme. The frame uses the
+// accent color so the always-visible input box is an obvious signal of the
+// active theme (it also makes the otherwise-similar dark/light themes differ).
+func inputBoxStyle(th theme.Theme) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(th.AccentColor()).
+		Padding(0, 1)
+}
+
+// applyThemeStyles rebuilds the color-bearing lipgloss styles from the active
+// theme. Called once at startup and again whenever the theme is switched, so
+// the input box, marker, and overlay title track the current palette.
+func applyThemeStyles() {
+	th := theme.Current()
+	styleInputBox = inputBoxStyle(th)
+	styleMarker = lipgloss.NewStyle().Foreground(th.AccentColor())
+	styleAsk = lipgloss.NewStyle().Bold(true).Foreground(th.AccentColor())
+}
 
 // editorModel is the bubbletea model for one input line: a text field plus
 // a live completion popup for "/" commands, skills, and "@" file paths.

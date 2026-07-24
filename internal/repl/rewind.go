@@ -9,6 +9,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/checkpoint"
 	"github.com/xautjzd/agent-cli/internal/textwidth"
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // cmdRewind implements /rewind: pick an earlier checkpoint and roll both the
@@ -60,15 +61,17 @@ func (r *Repl) confirmRewind(mi int, label string) bool {
 		return true // conversation-only rewind; nothing on disk to warn about
 	}
 
-	fmt.Fprintln(r.Out, "\033[36mThis will change on disk:\033[0m")
+	th := theme.Current()
+	fmt.Fprintln(r.Out, th.Paint(th.Accent, "This will change on disk:"))
 	for _, e := range effects {
 		if e.Delete {
 			// Deletion is the surprising case (the file was created after
-			// this point), so flag it in red.
-			fmt.Fprintf(r.Out, "  \033[31m✗ delete\033[0m  %s \033[2m(created after this point)\033[0m\n", r.relPath(e.Path))
+			// this point), so flag it in the error color.
+			fmt.Fprintf(r.Out, "  %s  %s %s\n", th.Paint(th.Error, "✗ delete"),
+				r.relPath(e.Path), th.Paint(th.Muted, "(created after this point)"))
 		} else {
-			fmt.Fprintf(r.Out, "  \033[33m↺ restore\033[0m %s \033[2m→\033[0m %s\n",
-				r.relPath(e.Path), contentPreview(e.Content))
+			fmt.Fprintf(r.Out, "  %s %s %s %s\n", th.Paint(th.Warning, "↺ restore"),
+				r.relPath(e.Path), th.Paint(th.Muted, "→"), contentPreview(e.Content))
 		}
 	}
 	answer, ok := r.readInput("Proceed? [y]es / [N]o ")
@@ -118,8 +121,9 @@ func (r *Repl) rewindTo(mi int) error {
 	} else if restored > 1 {
 		fileNote = fmt.Sprintf("restored %d files", restored)
 	}
-	fmt.Fprintf(r.Out, "\033[36m↩ Rewound\033[0m — %s, conversation trimmed to %d message(s).\n",
-		fileNote, target.MsgCount-1)
+	th := theme.Current()
+	fmt.Fprintf(r.Out, "%s — %s, conversation trimmed to %d message(s).\n",
+		th.Paint(th.Accent, "↩ Rewound"), fileNote, target.MsgCount-1)
 	return nil
 }
 

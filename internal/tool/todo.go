@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // TodoWrite is the task-planning tool: the model maintains a structured todo
@@ -122,12 +124,7 @@ func RenderTodos(items []TodoItem) string {
 	if len(items) == 0 {
 		return "Todo list is empty."
 	}
-	const (
-		dim    = "\033[2m"
-		green  = "\033[32m"
-		yellow = "\033[33m"
-		reset  = "\033[0m"
-	)
+	th := theme.Current()
 	var b strings.Builder
 	b.WriteString("Todos:\n")
 	var pending, active, done int
@@ -135,19 +132,19 @@ func RenderTodos(items []TodoItem) string {
 		switch it.Status {
 		case TodoCompleted:
 			done++
-			fmt.Fprintf(&b, "  %s✓ %s%s\n", green, it.Content, reset)
+			fmt.Fprintf(&b, "  %s\n", th.Paint(th.Success, "✓ "+it.Content))
 		case TodoInProgress:
 			active++
 			label := it.Content
 			if it.ActiveForm != "" {
 				label = it.ActiveForm
 			}
-			fmt.Fprintf(&b, "  %s▶ %s%s\n", yellow, label, reset)
+			fmt.Fprintf(&b, "  %s\n", th.Paint(th.Warning, "▶ "+label))
 		default:
 			pending++
-			fmt.Fprintf(&b, "  %s☐ %s%s\n", dim, it.Content, reset)
+			fmt.Fprintf(&b, "  %s\n", th.Paint(th.Muted, "☐ "+it.Content))
 		}
 	}
-	fmt.Fprintf(&b, "%s(%d done · %d in progress · %d pending)%s", dim, done, active, pending, reset)
+	fmt.Fprintf(&b, "%s", th.Paint(th.Muted, fmt.Sprintf("(%d done · %d in progress · %d pending)", done, active, pending)))
 	return b.String()
 }

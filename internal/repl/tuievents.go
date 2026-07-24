@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/xautjzd/agent-cli/internal/agent"
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // tuiEvents renders agent activity into the scrollback for the full-screen UI.
@@ -26,39 +27,33 @@ type tuiEvents struct {
 
 func newTUIEvents(out io.Writer) *tuiEvents { return &tuiEvents{out: out} }
 
-// ANSI fragments (kept local so this file has no cross-package dependency).
-const (
-	tuiReset  = "\033[0m"
-	tuiDim    = "\033[2m"
-	tuiItalic = "\033[3m"
-	tuiGreen  = "\033[32m"
-	tuiRed    = "\033[31m"
-	tuiYellow = "\033[33m"
-)
-
 func (e *tuiEvents) OnUserPrompt(text string) {
-	fmt.Fprintf(e.out, "\n\033[36m❯\033[0m %s\n", text)
+	th := theme.Current()
+	fmt.Fprintf(e.out, "\n%s\n", th.Paint(th.Accent, "❯ "+text))
 }
 
 func (e *tuiEvents) OnThinking(text string) {
-	fmt.Fprintf(e.out, "%s%s✻ Thinking%s\n%s%s%s%s\n",
-		tuiDim, tuiItalic, tuiReset, tuiDim, tuiItalic, text, tuiReset)
+	th := theme.Current()
+	fmt.Fprintf(e.out, "%s\n%s\n", th.Paint(th.Thinking, "✻ Thinking"), th.Paint(th.Thinking, text))
 }
 
 func (e *tuiEvents) OnAssistantText(text string) {
-	fmt.Fprintf(e.out, "%s\n", text)
+	th := theme.Current()
+	fmt.Fprintf(e.out, "%s\n", th.Paint(th.Text, text))
 }
 
 func (e *tuiEvents) OnToolCall(name, args string) {
-	e.lastCall = fmt.Sprintf("%s(%s)", camelTool(name), compactToolArgs(args))
-	// Print immediately (yellow dot = running) so long tools show progress.
-	fmt.Fprintf(e.out, "%s●%s %s\n", tuiYellow, tuiReset, e.lastCall)
+	th := theme.Current()
+	e.lastCall = fmt.Sprintf("%s(%s)", th.Paint(th.Accent, camelTool(name)), compactToolArgs(args))
+	// Print immediately (warning dot = running) so long tools show progress.
+	fmt.Fprintf(e.out, "%s %s\n", th.Paint(th.Warning, "●"), e.lastCall)
 }
 
 func (e *tuiEvents) OnToolResult(name, result string, ok bool) {
-	color := tuiGreen
+	th := theme.Current()
+	marker := th.Success
 	if !ok {
-		color = tuiRed
+		marker = th.Error
 	}
 	// The todo list is meant to be read in full — show every line, indented.
 	if name == "todo_write" {
@@ -69,37 +64,42 @@ func (e *tuiEvents) OnToolResult(name, result string, ok bool) {
 	}
 	// A short preview of the result under the call, dimmed.
 	preview := firstLine(result, 200)
-	fmt.Fprintf(e.out, "  %s⎿%s %s%s%s\n", color, tuiReset, tuiDim, preview, tuiReset)
+	fmt.Fprintf(e.out, "  %s %s\n", th.Paint(marker, "⎿"), th.Paint(th.Muted, preview))
 }
 
 func (e *tuiEvents) OnTurnStats(s agent.TurnStats) {
-	fmt.Fprintf(e.out, "%s⏱ %s · %d in + %d out · context %d tok%s\n",
-		tuiDim, s.Duration.Round(time.Millisecond), s.PromptTokens, s.CompletionTokens, s.ContextTokens, tuiReset)
+	th := theme.Current()
+	fmt.Fprintf(e.out, "%s\n", th.Paint(th.Muted, fmt.Sprintf(
+		"⏱ %s · %d in + %d out · context %d tok",
+		s.Duration.Round(time.Millisecond), s.PromptTokens, s.CompletionTokens, s.ContextTokens)))
 }
 
 // StreamEvents: fragments append live; the scrollback notify drives the redraw.
 
 func (e *tuiEvents) OnThinkingDelta(text string) {
+	th := theme.Current()
 	if e.streaming != 1 {
-		fmt.Fprintf(e.out, "%s%s✻ Thinking%s\n%s%s", tuiDim, tuiItalic, tuiReset, tuiDim, tuiItalic)
+		fmt.Fprintf(e.out, "%s\n%s", th.Paint(th.Thinking, "✻ Thinking"), th.Thinking)
 		e.streaming = 1
 	}
 	fmt.Fprint(e.out, text)
 }
 
 func (e *tuiEvents) OnAssistantDelta(text string) {
+	th := theme.Current()
 	if e.streaming == 1 {
-		fmt.Fprint(e.out, tuiReset+"\n") // close the thinking block
+		fmt.Fprint(e.out, th.Reset+"\n") // close the thinking block
 	}
-	e.streaming = 2
+	if e.streaming != 2 {
+		fmt.Fprint(e.out, th.Text) // open the answer-body tint
+		e.streaming = 2
+	}
 	fmt.Fprint(e.out, text)
 }
 
 func (e *tuiEvents) OnStreamEnd() {
-	if e.streaming == 1 {
-		fmt.Fprint(e.out, tuiReset)
-	}
 	if e.streaming != 0 {
+		fmt.Fprint(e.out, theme.Current().Reset)
 		fmt.Fprint(e.out, "\n")
 	}
 	e.streaming = 0
@@ -107,8 +107,9 @@ func (e *tuiEvents) OnStreamEnd() {
 
 // OnCompaction reports an automatic context compaction.
 func (e *tuiEvents) OnCompaction(s agent.CompactionStats) {
-	fmt.Fprintf(e.out, "%s⊙ Compacted context (%s): %d→%d messages%s\n",
-		tuiDim, s.Trigger, s.MessagesBefore, s.MessagesAfter, tuiReset)
+	th := theme.Current()
+	fmt.Fprintf(e.out, "%s\n", th.Paint(th.Muted, fmt.Sprintf(
+		"⊙ Compacted context (%s): %d→%d messages", s.Trigger, s.MessagesBefore, s.MessagesAfter)))
 }
 
 // camelTool renders a tool name in CamelCase (read_file → ReadFile).

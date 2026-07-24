@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/xautjzd/agent-cli/internal/catalog"
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // candidate is one completion suggestion shown in the popup.
@@ -122,6 +123,11 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 				continue
 			}
 			options = append(options, [2]string{m, r.Cfg.Provider})
+		}
+	case "theme":
+		for _, n := range theme.Names() {
+			th, _ := theme.Get(n)
+			options = append(options, [2]string{n, th.Description})
 		}
 	default:
 		return nil

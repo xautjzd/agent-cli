@@ -8,6 +8,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/permission"
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // Interactive configuration, in the spirit of Claude Code's /config panel:
@@ -68,6 +69,8 @@ func (r *Repl) currentValue(key string) string {
 		return "standard"
 	case "sandbox":
 		return orDefault(r.Cfg.Sandbox, "off")
+	case "theme":
+		return orDefault(r.Cfg.Theme, theme.Default())
 	}
 	return ""
 }
@@ -303,6 +306,12 @@ func (r *Repl) applyLive(ctx context.Context, key, value string) error {
 		}
 		r.Cfg.Sandbox = value
 		fmt.Fprintln(r.Out, "note: sandbox change takes effect on restart")
+		return nil
+	case "theme":
+		if !theme.Has(value) {
+			return fmt.Errorf("unknown theme %q", value)
+		}
+		r.switchTheme(value)
 		return nil
 	}
 	return fmt.Errorf("unknown config key %q (valid: %v)", key, config.Keys())

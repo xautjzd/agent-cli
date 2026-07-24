@@ -3,6 +3,7 @@ package repl
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // Full-screen interactive UI. Unlike the per-line inline editor (which the
@@ -49,6 +52,17 @@ func (s *scrollback) String() string {
 	return s.buf.String()
 }
 
+// Reset clears the buffer so the transcript can be reprinted from scratch
+// (used when /theme re-colors the whole session).
+func (s *scrollback) Reset() {
+	s.mu.Lock()
+	s.buf.Reset()
+	s.mu.Unlock()
+	if s.notify != nil {
+		s.notify()
+	}
+}
+
 // --- messages ---------------------------------------------------------------
 
 type refreshMsg struct{}             // scrollback changed; re-render the viewport
@@ -70,6 +84,10 @@ type selectMsg struct {
 	title string
 	items []pickerItem
 	reply chan pickReply
+	// preview, when set, is called with the original item index each time the
+	// highlight moves (and on open), so a picker can show a live preview of the
+	// highlighted choice (e.g. /theme applies the theme as you scroll).
+	preview func(int)
 }
 type pickReply struct {
 	idx int
@@ -85,6 +103,7 @@ type pickState struct {
 	sel      int // index into filtered
 	offset   int // first visible row
 	reply    chan pickReply
+	preview  func(int)
 }
 
 // pickRows is the visible height of a selection overlay's list.
@@ -121,14 +140,28 @@ type tuiModel struct {
 
 // tui styles.
 var (
-	styleWorking = lipgloss.NewStyle().Faint(true)                                // "working…" placeholder
-	styleAsk     = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true) // overlay title
+	styleWorking = lipgloss.NewStyle().Faint(true)                                          // "working…" placeholder
+	styleAsk     = lipgloss.NewStyle().Bold(true).Foreground(theme.Current().AccentColor()) // overlay title
 )
+
+// printBanner writes the startup banner (dimmed) to w. Shared by runTUI and
+// /theme re-render so the reprinted transcript keeps its header.
+func (r *Repl) printBanner(w io.Writer) {
+	th := theme.Current()
+	fmt.Fprintf(w, "%s\n", th.Paint(th.Muted, fmt.Sprintf("agent-cli — provider=%s model=%s", r.Cfg.Provider, r.Cfg.Model)))
+	fmt.Fprintf(w, "%s\n", th.Paint(th.Muted, "Type a task · \"@path\" to reference files · \"/\" for commands · /exit to quit"))
+}
 
 // runTUI runs the full-screen interactive session. It swaps r.Out and the
 // agent's event sink onto an in-memory scrollback for the duration, restoring
 // them on exit.
 func (r *Repl) runTUI(ctx context.Context) error {
+	// Restyle the input box / marker / overlay from the configured theme: the
+	// package-level lipgloss styles were built at init time (default theme),
+	// before main applied the config, so a non-default configured theme needs
+	// them rebuilt now.
+	applyThemeStyles()
+
 	realOut := r.Out
 	sb := &scrollback{}
 
@@ -149,8 +182,7 @@ func (r *Repl) runTUI(ctx context.Context) error {
 
 	// Seed the banner while notify is still nil, so it does not try to Send to
 	// the program before its event loop is running (which would deadlock).
-	fmt.Fprintf(sb, "\033[2magent-cli — provider=%s model=%s\033[0m\n", r.Cfg.Provider, r.Cfg.Model)
-	fmt.Fprintln(sb, "\033[2mType a task · \"@path\" to reference files · \"/\" for commands · /exit to quit\033[0m")
+	r.printBanner(sb)
 
 	// Refresh on every scrollback write. Send from a goroutine so a write from
 	// within Update (or before Run starts) never blocks the caller.
@@ -158,18 +190,22 @@ func (r *Repl) runTUI(ctx context.Context) error {
 
 	// Route all conversation output through the scrollback while the TUI runs.
 	r.Out = sb
+	r.sb = sb
 	oldEvents := r.Agent.Events
 	r.Agent.Events = newTUIEvents(sb)
 	r.tuiAsk = m.requestInput
 	r.tuiAskSecret = m.requestSecret
 	r.tuiSelect = m.requestSelect
+	r.tuiSelectPreview = m.requestSelectPreview
 	r.useTUI = false // in-model overlays replace the old nested-program pickers
 	defer func() {
 		r.Out = realOut
+		r.sb = nil
 		r.Agent.Events = oldEvents
 		r.tuiAsk = nil
 		r.tuiAskSecret = nil
 		r.tuiSelect = nil
+		r.tuiSelectPreview = nil
 	}()
 
 	_, err := p.Run()
@@ -197,8 +233,14 @@ func (m *tuiModel) ask2(prompt string, secret bool) (string, bool) {
 // requestSelect opens an arrow-navigable selection overlay and blocks the
 // calling (turn) goroutine until the user picks an item or cancels.
 func (m *tuiModel) requestSelect(title string, items []pickerItem) (int, bool) {
+	return m.requestSelectPreview(title, items, nil)
+}
+
+// requestSelectPreview is requestSelect with a live-preview callback invoked as
+// the highlight moves (and on open); on cancel the caller reverts the preview.
+func (m *tuiModel) requestSelectPreview(title string, items []pickerItem, preview func(int)) (int, bool) {
 	reply := make(chan pickReply, 1)
-	m.program.Send(selectMsg{title: title, items: items, reply: reply})
+	m.program.Send(selectMsg{title: title, items: items, reply: reply, preview: preview})
 	rp := <-reply
 	return rp.idx, rp.ok
 }
@@ -235,8 +277,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case selectMsg:
 		// A selection overlay: arrow keys navigate, typing filters.
-		m.pick = &pickState{title: msg.title, items: msg.items, reply: msg.reply}
-		m.pickRefilter()
+		m.pick = &pickState{title: msg.title, items: msg.items, reply: msg.reply, preview: msg.preview}
+		m.pickRefilter() // also previews the initially highlighted item
 		return m, nil
 
 	case turnDoneMsg:
@@ -302,12 +344,14 @@ func (m *tuiModel) handlePickKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(p.filtered) > 0 {
 			p.sel = (p.sel - 1 + len(p.filtered)) % len(p.filtered)
 			m.pickScroll()
+			m.pickPreview()
 		}
 		return m, nil
 	case tea.KeyDown, tea.KeyCtrlN:
 		if len(p.filtered) > 0 {
 			p.sel = (p.sel + 1) % len(p.filtered)
 			m.pickScroll()
+			m.pickPreview()
 		}
 		return m, nil
 	case tea.KeyEnter:
@@ -353,6 +397,17 @@ func (m *tuiModel) pickRefilter() {
 		p.sel = 0
 	}
 	m.pickScroll()
+	m.pickPreview()
+}
+
+// pickPreview invokes the overlay's preview callback for the currently
+// highlighted item, so pickers like /theme show the choice live as you move.
+func (m *tuiModel) pickPreview() {
+	p := m.pick
+	if p == nil || p.preview == nil || p.sel < 0 || p.sel >= len(p.filtered) {
+		return
+	}
+	p.preview(p.filtered[p.sel])
 }
 
 func (m *tuiModel) pickScroll() {
@@ -511,7 +566,7 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	if p := m.basePrompt(); p != "> " {
 		label = p + line
 	}
-	fmt.Fprintf(m.sb, "\n%s %s\n", styleMarker.Render("❯"), label)
+	fmt.Fprintf(m.sb, "\n%s\n", styleMarker.Render("❯ "+label))
 
 	m.input.SetValue("")
 	m.cands = nil
@@ -633,6 +688,10 @@ func (m *tuiModel) refreshViewport() {
 // box, or the working indicator while a turn runs.
 func (m *tuiModel) footer() string {
 	width := m.boxWidth()
+
+	// Tint the input prompt "> " with the active accent so the box is themed
+	// end to end (rebuilt each frame so a /theme switch takes effect at once).
+	m.input.PromptStyle = lipgloss.NewStyle().Foreground(theme.Current().AccentColor())
 
 	// A selection overlay takes over the whole footer.
 	if m.pick != nil {

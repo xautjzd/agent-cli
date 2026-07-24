@@ -42,6 +42,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/skill"
 	"github.com/xautjzd/agent-cli/internal/subagent"
 	"github.com/xautjzd/agent-cli/internal/textwidth"
+	"github.com/xautjzd/agent-cli/internal/theme"
 	"github.com/xautjzd/agent-cli/internal/usage"
 	"github.com/xautjzd/agent-cli/internal/webtool"
 
@@ -103,6 +104,10 @@ func run(args []string) error {
 	}
 	if cfg.Model == "" {
 		return fmt.Errorf("no model configured for provider %q; pass -model or set AGENT_MODEL", cfg.Provider)
+	}
+	// Apply the configured color theme before anything renders.
+	if cfg.Theme != "" {
+		theme.Set(cfg.Theme)
 	}
 
 	workDir, err := os.Getwd()
@@ -424,7 +429,8 @@ func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
 	// extension points.
 	ag.Hooks = r
 	if sbox.Available() {
-		fmt.Fprintf(os.Stderr, "\033[2m● sandbox: %s\033[0m\n", sbox.Reason())
+		th := theme.Current()
+		fmt.Fprintf(os.Stderr, "%s\n", th.Paint(th.Muted, "● sandbox: "+sbox.Reason()))
 	}
 	// The REPL is the permission gate: dangerous tool calls are confirmed
 	// (HITL) or audit-logged (bypass) before execution — for the main agent
@@ -527,16 +533,6 @@ func terminalWidth() int {
 	return 98
 }
 
-// ANSI fragments used by the terminal renderer.
-const (
-	ansiReset  = "\033[0m"
-	ansiDim    = "\033[2m"
-	ansiItalic = "\033[3m"
-	ansiGreen  = "\033[32m"
-	ansiRed    = "\033[31m"
-	ansiYellow = "\033[33m"
-)
-
 // terminalEvents renders agent activity to the terminal in the Claude Code
 // idiom: "● ToolName(args)" headers whose dot color reflects status, "⎿"
 // result previews, and visually distinct thinking output.
@@ -556,8 +552,9 @@ func newTerminalEvents() *terminalEvents { return &terminalEvents{out: os.Stdout
 // OnThinkingDelta opens the thinking style on the first fragment and prints
 // fragments as they arrive, visually identical to the non-streamed block.
 func (e *terminalEvents) OnThinkingDelta(text string) {
+	th := theme.Current()
 	if e.streamState != 1 {
-		fmt.Fprintf(e.out, "\n%s%s✻ Thinking…%s\n%s%s", ansiDim, ansiItalic, ansiReset, ansiDim, ansiItalic)
+		fmt.Fprintf(e.out, "\n%s✻ Thinking…%s\n%s", th.Thinking, th.Reset, th.Thinking)
 		e.streamState = 1
 	}
 	fmt.Fprint(e.out, text)
@@ -566,11 +563,12 @@ func (e *terminalEvents) OnThinkingDelta(text string) {
 // OnAssistantDelta switches from thinking to answer styling when needed and
 // prints answer fragments live.
 func (e *terminalEvents) OnAssistantDelta(text string) {
+	th := theme.Current()
 	if e.streamState == 1 {
-		fmt.Fprint(e.out, ansiReset+"\n")
+		fmt.Fprint(e.out, th.Reset+"\n")
 	}
 	if e.streamState != 2 {
-		fmt.Fprint(e.out, "\n")
+		fmt.Fprint(e.out, "\n"+th.Text) // open the answer-body tint
 		e.streamState = 2
 	}
 	fmt.Fprint(e.out, text)
@@ -578,10 +576,8 @@ func (e *terminalEvents) OnAssistantDelta(text string) {
 
 // OnStreamEnd closes styling and spacing after a streamed completion.
 func (e *terminalEvents) OnStreamEnd() {
-	if e.streamState == 1 {
-		fmt.Fprint(e.out, ansiReset)
-	}
 	if e.streamState != 0 {
+		fmt.Fprint(e.out, theme.Current().Reset)
 		fmt.Fprintln(e.out)
 	}
 	e.streamState = 0
@@ -591,35 +587,41 @@ func (e *terminalEvents) OnStreamEnd() {
 // the same collapsed "❯ input" form a submitted editor line leaves in
 // scrollback.
 func (e *terminalEvents) OnUserPrompt(text string) {
-	fmt.Fprintf(e.out, "\n\033[36m❯\033[0m %s\n", text)
+	th := theme.Current()
+	fmt.Fprintf(e.out, "\n%s\n", th.Paint(th.Accent, "❯ "+text))
 }
 
 // OnThinking renders chain-of-thought dim and italic under a "✻ Thinking"
 // header, clearly separated from the final answer.
 func (e *terminalEvents) OnThinking(text string) {
-	fmt.Fprintf(e.out, "\n%s%s✻ Thinking…%s\n", ansiDim, ansiItalic, ansiReset)
+	th := theme.Current()
+	fmt.Fprintf(e.out, "\n%s\n", th.Paint(th.Thinking, "✻ Thinking…"))
 	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
-		fmt.Fprintf(e.out, "%s%s  %s%s\n", ansiDim, ansiItalic, line, ansiReset)
+		fmt.Fprintf(e.out, "%s\n", th.Paint(th.Thinking, "  "+line))
 	}
 }
 
 func (e *terminalEvents) OnAssistantText(text string) {
-	fmt.Fprintln(e.out, "\n"+text)
+	th := theme.Current()
+	fmt.Fprintln(e.out, "\n"+th.Paint(th.Text, text))
 }
 
-// OnToolCall prints the header with a yellow "running" dot. Nothing else
-// writes to the terminal until OnToolResult, which repaints the dot.
+// OnToolCall prints the header with a yellow "running" dot and the tool name
+// in the accent color. Nothing else writes to the terminal until OnToolResult,
+// which repaints the dot.
 func (e *terminalEvents) OnToolCall(name, args string) {
-	e.lastCall = fmt.Sprintf("%s(%s)", camelName(name), compactArgs(args))
-	fmt.Fprintf(e.out, "\n%s●%s %s\n", ansiYellow, ansiReset, e.lastCall)
+	th := theme.Current()
+	e.lastCall = fmt.Sprintf("%s(%s)", th.Paint(th.Accent, camelName(name)), compactArgs(args))
+	fmt.Fprintf(e.out, "\n%s %s\n", th.Paint(th.Warning, "●"), e.lastCall)
 }
 
 // OnToolResult moves the cursor back onto the header line, repaints the dot
 // green (success) or red (failure), then prints a dim result preview.
 func (e *terminalEvents) OnToolResult(name, result string, ok bool) {
-	dot := ansiGreen + "●" + ansiReset
+	th := theme.Current()
+	dot := th.Paint(th.Success, "●")
 	if !ok {
-		dot = ansiRed + "●" + ansiReset
+		dot = th.Paint(th.Error, "●")
 	}
 	// \033[1A: up one line; \r: to column 0; \033[2K: erase the line.
 	fmt.Fprintf(e.out, "\033[1A\r\033[2K%s %s\n", dot, e.lastCall)
@@ -635,7 +637,7 @@ func (e *terminalEvents) OnToolResult(name, result string, ok bool) {
 	// File edits report a unified diff; render it in full and colorized
 	// rather than collapsing it to a one-line preview.
 	if body := diffBody(lines); body != nil {
-		fmt.Fprintf(e.out, "  %s⎿ %s%s\n", ansiDim, lines[0], ansiReset)
+		fmt.Fprintf(e.out, "  %s\n", th.Paint(th.Muted, "⎿ "+lines[0]))
 		e.renderDiff(body)
 		return
 	}
@@ -647,7 +649,7 @@ func (e *terminalEvents) OnToolResult(name, result string, ok bool) {
 	if len(lines) > 1 {
 		preview += fmt.Sprintf(" (+%d lines)", len(lines)-1)
 	}
-	fmt.Fprintf(e.out, "  %s⎿ %s%s\n", ansiDim, preview, ansiReset)
+	fmt.Fprintf(e.out, "  %s\n", th.Paint(th.Muted, "⎿ "+preview))
 }
 
 // diffLineRe matches a rendered unified-diff line: right-aligned line number,
@@ -675,24 +677,25 @@ func diffBody(lines []string) []string {
 // renderDiff prints diff lines with additions in green, removals in red and
 // context dimmed, indented under the result marker.
 func (e *terminalEvents) renderDiff(body []string) {
+	th := theme.Current()
 	shown := body
 	if len(shown) > maxDiffLines {
 		shown = shown[:maxDiffLines]
 	}
 	for _, l := range shown {
-		color := ansiDim
+		color := th.Muted
 		if m := diffLineRe.FindString(l); m != "" {
 			switch m[len(m)-2] {
 			case '+':
-				color = ansiGreen
+				color = th.Success
 			case '-':
-				color = ansiRed
+				color = th.Error
 			}
 		}
-		fmt.Fprintf(e.out, "    %s%s%s\n", color, l, ansiReset)
+		fmt.Fprintf(e.out, "    %s\n", th.Paint(color, l))
 	}
 	if n := len(body) - len(shown); n > 0 {
-		fmt.Fprintf(e.out, "    %s… %d more diff line(s)%s\n", ansiDim, n, ansiReset)
+		fmt.Fprintf(e.out, "    %s\n", th.Paint(th.Muted, fmt.Sprintf("… %d more diff line(s)", n)))
 	}
 }
 
@@ -700,26 +703,26 @@ func (e *terminalEvents) renderDiff(body []string) {
 // this turn's token split, the current context occupancy, and session
 // totals.
 func (e *terminalEvents) OnTurnStats(s agent.TurnStats) {
-	fmt.Fprintf(e.out, "%s⏱ %s · turn: %s in + %s out (%d round%s) · context: %s tok · session: %s tok, %s%s\n",
-		ansiDim,
+	th := theme.Current()
+	fmt.Fprintf(e.out, "%s\n", th.Paint(th.Muted, fmt.Sprintf(
+		"⏱ %s · turn: %s in + %s out (%d round%s) · context: %s tok · session: %s tok, %s",
 		formatDuration(s.Duration),
 		formatTokens(s.PromptTokens), formatTokens(s.CompletionTokens),
 		s.Rounds, plural(s.Rounds),
 		formatTokens(s.ContextTokens),
-		formatTokens(s.SessionTokens), formatDuration(s.SessionDuration),
-		ansiReset)
+		formatTokens(s.SessionTokens), formatDuration(s.SessionDuration))))
 }
 
 // OnCompaction prints a dim notice when the conversation is compacted, so the
 // user understands why earlier turns are no longer verbatim in context.
 func (e *terminalEvents) OnCompaction(s agent.CompactionStats) {
-	fmt.Fprintf(e.out, "%s⊙ Compacted context (%s): summarized %d earlier message%s into ~%s chars; %d → %d messages%s\n",
-		ansiDim,
+	th := theme.Current()
+	fmt.Fprintf(e.out, "%s\n", th.Paint(th.Muted, fmt.Sprintf(
+		"⊙ Compacted context (%s): summarized %d earlier message%s into ~%s chars; %d → %d messages",
 		s.Trigger,
 		s.SummarizedMessages, plural(s.SummarizedMessages),
 		formatTokens(s.SummaryChars),
-		s.MessagesBefore, s.MessagesAfter,
-		ansiReset)
+		s.MessagesBefore, s.MessagesAfter)))
 }
 
 // formatTokens renders counts with thousands separators (12,345).
