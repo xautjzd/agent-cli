@@ -232,3 +232,13 @@ func SetColorProfile(p termenv.Profile) {
 // DetectedProfile returns the color profile auto-detected from the environment,
 // so callers can restore it after forcing another.
 func DetectedProfile() termenv.Profile { return termenv.EnvColorProfile() }
+
+// ActiveProfile returns the color capability the active theme was built with.
+// Unlike DetectedProfile it reflects any override set via SetColorProfile, so a
+// render site can pick a matching syntax-highlighter formatter (or skip color
+// entirely when it is termenv.Ascii).
+func ActiveProfile() termenv.Profile {
+	mu.RLock()
+	defer mu.RUnlock()
+	return profile
+}

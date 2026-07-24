@@ -33,6 +33,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/hook"
 	"github.com/xautjzd/agent-cli/internal/lsp"
 	"github.com/xautjzd/agent-cli/internal/mcp"
+	"github.com/xautjzd/agent-cli/internal/mdstream"
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/permission"
 	"github.com/xautjzd/agent-cli/internal/provider"
@@ -555,6 +556,9 @@ type terminalEvents struct {
 	// streamState tracks what a streamed completion is currently emitting:
 	// 0 = nothing yet, 1 = thinking, 2 = answer text.
 	streamState int
+	// render is the Markdown renderer for the in-flight answer stream: it
+	// colorizes diff blocks and syntax-highlights code as fragments arrive.
+	render *mdstream.Renderer
 }
 
 func newTerminalEvents() *terminalEvents { return &terminalEvents{out: os.Stdout} }
@@ -578,14 +582,21 @@ func (e *terminalEvents) OnAssistantDelta(text string) {
 		fmt.Fprint(e.out, th.Reset+"\n")
 	}
 	if e.streamState != 2 {
-		fmt.Fprint(e.out, "\n"+th.Text) // open the answer-body tint
+		fmt.Fprint(e.out, "\n") // blank line before the answer body
+		// Route answer text through the Markdown renderer so diff blocks and
+		// code are colorized as they stream in.
+		e.render = mdstream.New(e.out, th.Text)
 		e.streamState = 2
 	}
-	fmt.Fprint(e.out, text)
+	e.render.Write(text)
 }
 
 // OnStreamEnd closes styling and spacing after a streamed completion.
 func (e *terminalEvents) OnStreamEnd() {
+	if e.render != nil {
+		e.render.Close()
+		e.render = nil
+	}
 	if e.streamState != 0 {
 		fmt.Fprint(e.out, theme.Current().Reset)
 		fmt.Fprintln(e.out)
@@ -612,8 +623,10 @@ func (e *terminalEvents) OnThinking(text string) {
 }
 
 func (e *terminalEvents) OnAssistantText(text string) {
-	th := theme.Current()
-	fmt.Fprintln(e.out, "\n"+th.Paint(th.Text, text))
+	fmt.Fprintln(e.out) // blank line separating the answer from prior output
+	r := mdstream.New(e.out, theme.Current().Text)
+	r.Write(text)
+	r.Close()
 }
 
 // OnToolCall prints the header with a yellow "running" dot and the tool name

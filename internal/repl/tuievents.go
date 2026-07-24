@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/xautjzd/agent-cli/internal/agent"
+	"github.com/xautjzd/agent-cli/internal/mdstream"
 	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
@@ -23,6 +24,9 @@ type tuiEvents struct {
 	// answer text (2), or nothing (0), so spacing/headers are emitted once.
 	streaming int
 	lastCall  string
+	// render is the Markdown renderer for the in-flight answer stream: it
+	// colorizes diff blocks and syntax-highlights code as fragments arrive.
+	render *mdstream.Renderer
 }
 
 func newTUIEvents(out io.Writer) *tuiEvents { return &tuiEvents{out: out} }
@@ -38,8 +42,9 @@ func (e *tuiEvents) OnThinking(text string) {
 }
 
 func (e *tuiEvents) OnAssistantText(text string) {
-	th := theme.Current()
-	fmt.Fprintf(e.out, "%s\n", th.Paint(th.Text, text))
+	r := mdstream.New(e.out, theme.Current().Text)
+	r.Write(text)
+	r.Close()
 }
 
 func (e *tuiEvents) OnToolCall(name, args string) {
@@ -91,13 +96,19 @@ func (e *tuiEvents) OnAssistantDelta(text string) {
 		fmt.Fprint(e.out, th.Reset+"\n") // close the thinking block
 	}
 	if e.streaming != 2 {
-		fmt.Fprint(e.out, th.Text) // open the answer-body tint
+		// Route answer text through the Markdown renderer so diff blocks and
+		// code are colorized as they stream in.
+		e.render = mdstream.New(e.out, th.Text)
 		e.streaming = 2
 	}
-	fmt.Fprint(e.out, text)
+	e.render.Write(text)
 }
 
 func (e *tuiEvents) OnStreamEnd() {
+	if e.render != nil {
+		e.render.Close()
+		e.render = nil
+	}
 	if e.streaming != 0 {
 		fmt.Fprint(e.out, theme.Current().Reset)
 		fmt.Fprint(e.out, "\n")
