@@ -65,10 +65,10 @@ func TestProviderSwitchReconcilesBaseURL(t *testing.T) {
 	if err := config.SetScoped(config.ScopeGlobal, "", "base_url", "https://api.deepseek.com"); err != nil {
 		t.Fatal(err)
 	}
-	r, _, _ := newTestRepl(t, "")
+	// deepseek-anthropic is a bearer-token Anthropic-wire preset, so it still
+	// needs a key: feed one, then skip saving.
+	r, _, _ := newTestRepl(t, "sk-test-key\nn\n")
 
-	// deepseek-anthropic is an Anthropic-format preset, so the switch succeeds
-	// without a key prompt.
 	if err := r.dispatch(context.Background(), "/provider deepseek-anthropic"); err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +81,33 @@ func TestProviderSwitchReconcilesBaseURL(t *testing.T) {
 	}
 	if cfg.BaseURL != "https://api.deepseek.com/anthropic" {
 		t.Errorf("base_url did not follow the new provider: got %q", cfg.BaseURL)
+	}
+}
+
+// TestProviderBearerAnthropicPromptsForKey guards the reported regression:
+// switching to a third-party Anthropic-wire preset (bearer auth) with no
+// resolvable credential must prompt for the key rather than silently switching
+// and persisting a keyless provider that then fails at request time.
+func TestProviderBearerAnthropicPromptsForKey(t *testing.T) {
+	isolateEnv(t)
+	r, _, out := newTestRepl(t, "sk-ds-key\ny\n") // key, then save
+
+	if err := r.dispatch(context.Background(), "/provider deepseek-anthropic"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Enter API key for deepseek-anthropic") {
+		t.Errorf("expected an API-key prompt, got:\n%s", out.String())
+	}
+	if r.Cfg.Provider != "deepseek-anthropic" || r.Cfg.APIKey != "sk-ds-key" {
+		t.Errorf("config not updated: provider=%s key=%q", r.Cfg.Provider, r.Cfg.APIKey)
+	}
+	// The persisted profile must carry the key so the next load reconnects.
+	cfg, err := config.LoadIn("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := cfg.Providers["deepseek-anthropic"]; !ok || p.APIKey != "sk-ds-key" {
+		t.Errorf("key not persisted as a profile: %+v ok=%v", p, ok)
 	}
 }
 

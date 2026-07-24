@@ -652,8 +652,11 @@ func (c *Config) BuildProvider() (provider.Provider, error) {
 	}
 	if p, ok := catalog.Lookup(c.Provider); ok {
 		// Naming the exact variable to export turns the most common
-		// setup failure into a one-line fix.
-		if c.APIKey == "" && p.Format != provider.FormatAnthropic {
+		// setup failure into a one-line fix. The genuine Anthropic provider
+		// (AuthAPIKey) is exempt because it has its own credential paths, but
+		// third-party Anthropic-wire presets that authenticate with a bearer
+		// token still require one.
+		if c.APIKey == "" && (p.Format != provider.FormatAnthropic || p.Auth == provider.AuthBearer) {
 			return nil, fmt.Errorf("provider %s needs a credential: export %s (get one at %s)",
 				p.Name, strings.Join(p.EnvKeys, " or "), orDefault(p.Notes, "the vendor console"))
 		}
