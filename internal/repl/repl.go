@@ -186,7 +186,7 @@ func init() {
 		// Everyday session controls: model, reasoning, safety, planning.
 		{"help", "/help", "List commands and installed skills", (*Repl).cmdHelp},
 		{"model", "/model [name]", "Show or switch the model", (*Repl).cmdModel},
-		{"provider", "/provider <name> [model]", "Switch provider (anthropic, openai, deepseek, custom)", (*Repl).cmdProvider},
+		{"provider", "/provider <name> [model]", "Switch provider and save it (anthropic, openai, deepseek, custom)", (*Repl).cmdProvider},
 		{"effort", "/effort [off|low|medium|high|adaptive]", "Set reasoning-effort (extended thinking) level", (*Repl).cmdEffort},
 		{"mode", "/mode [hitl|bypass]", "Show or switch the permission mode for dangerous operations", (*Repl).cmdMode},
 		{"plan", "/plan [task|off]", "Plan mode: explore read-only, propose a plan, implement on approval", (*Repl).cmdPlan},
@@ -980,7 +980,22 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 	}
 	r.Agent.SetProvider(p, cfg.Model)
 	r.Cfg = cfg
-	fmt.Fprintf(r.Out, "Switched to provider=%s model=%s (history preserved)\n", name, cfg.Model)
+	// Persist the switch to the global config so it survives restarts, matching
+	// how /effort stores its choice. The model is only written when the caller
+	// named one explicitly; otherwise the profile/preset supplies its own model
+	// on the next load, so pinning a top-level model would just go stale.
+	saved := "session only"
+	if err := config.SetScoped(config.ScopeGlobal, "", "provider", name); err != nil {
+		fmt.Fprintln(r.Out, "warning: could not persist provider:", err)
+	} else {
+		saved = "saved"
+		if model != "" {
+			if err := config.SetScoped(config.ScopeGlobal, "", "model", model); err != nil {
+				fmt.Fprintln(r.Out, "warning: could not persist model:", err)
+			}
+		}
+	}
+	fmt.Fprintf(r.Out, "Switched to provider=%s model=%s (history preserved, %s)\n", name, cfg.Model, saved)
 	r.stripImagesIfNeeded()
 	return nil
 }

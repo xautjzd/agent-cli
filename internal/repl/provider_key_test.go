@@ -31,6 +31,30 @@ func TestProviderPromptsForKeyInsteadOfError(t *testing.T) {
 	}
 }
 
+// TestProviderSwitchPersistsToGlobal verifies a successful switch is written to
+// the global config so it survives a restart, matching /effort's behavior.
+func TestProviderSwitchPersistsToGlobal(t *testing.T) {
+	isolateEnv(t)
+	r, _, out := newTestRepl(t, "sk-test-key\nn\n")
+
+	if err := r.dispatch(context.Background(), "/provider siliconflow glm-not-real"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "saved") {
+		t.Errorf("switch should report it was saved:\n%s", out.String())
+	}
+	cfg, err := config.LoadIn("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "siliconflow" {
+		t.Errorf("provider not persisted: got %q", cfg.Provider)
+	}
+	if cfg.Model != "glm-not-real" {
+		t.Errorf("explicit model not persisted: got %q", cfg.Model)
+	}
+}
+
 // TestProviderKeyPromptCancel confirms an empty key cancels the switch.
 func TestProviderKeyPromptCancel(t *testing.T) {
 	isolateEnv(t)
