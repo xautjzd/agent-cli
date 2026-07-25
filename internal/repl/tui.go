@@ -181,29 +181,43 @@ var (
 func (r *Repl) printBanner(w io.Writer) {
 	th := theme.Current()
 
-	// label renders "key   value" with a dimmed, fixed-width key so the values
-	// line up in a column.
-	label := func(k, v string) string {
-		return th.Paint(th.Muted, fmt.Sprintf("%-9s", k)) + v
-	}
 	effort, _ := provider.ParseEffort(r.Cfg.Thinking)
-	rows := []string{
-		th.Paint(th.Accent, "✻ agent-cli") + th.Paint(th.Muted, "  v"+version.Version),
-		"",
-		label("provider", r.Cfg.Provider),
-		label("model", r.Cfg.Model),
-		label("effort", string(effort)),
-		label("context", abbrevTokens(r.Cfg.ContextLimit)+" tokens"),
-		label("cwd", abbrevHome(r.WorkDir)),
+	rows := [][2]string{
+		{"provider", r.Cfg.Provider},
+		{"model", r.Cfg.Model},
+		{"effort", string(effort)},
+		{"context", abbrevTokens(r.Cfg.ContextLimit) + " tokens"},
+		{"cwd", abbrevHome(r.WorkDir)},
 	}
+
+	// Size the block to the widest "key   value" row so the title's version can
+	// sit flush-right and the divider spans the full content width.
+	const keyW = 9
+	title, ver := "✻ agent-cli", "v"+version.Version
+	inner := lipgloss.Width(title) + 2 + lipgloss.Width(ver)
+	for _, kv := range rows {
+		if w := keyW + lipgloss.Width(kv[1]); w > inner {
+			inner = w
+		}
+	}
+
+	var b strings.Builder
+	// Title row: product name left in accent, version pushed flush-right.
+	gap := inner - lipgloss.Width(title) - lipgloss.Width(ver)
+	b.WriteString(th.Paint(th.Accent, title) + strings.Repeat(" ", gap) + th.Paint(th.Muted, ver) + "\n")
+	b.WriteString(th.Paint(th.Muted, strings.Repeat("─", inner)) + "\n")
+	for _, kv := range rows {
+		b.WriteString(th.Paint(th.Muted, fmt.Sprintf("%-*s", keyW, kv[0])) + kv[1] + "\n")
+	}
+
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(th.BorderColor()).
+		BorderForeground(th.AccentColor()).
 		Padding(0, 2).
-		Render(strings.Join(rows, "\n"))
+		Render(strings.TrimRight(b.String(), "\n"))
 
 	fmt.Fprintln(w, box)
-	fmt.Fprintf(w, "%s\n", th.Paint(th.Muted, "Type a task · \"@path\" to reference files · \"/\" for commands · /exit to quit"))
+	fmt.Fprintf(w, "%s\n", th.Paint(th.Muted, "Type a task  ·  \"/\" for commands  ·  \"@\" to add files  ·  \"/exit\" to quit"))
 }
 
 // abbrevTokens renders a context-window size compactly (128000 → "128K",
@@ -930,7 +944,7 @@ func (m *tuiModel) footer() string {
 		b.WriteString("\n" + styleHint.Render("  interrupting keeps the conversation — add more and continue"))
 	default:
 		b.WriteString(box.Render(m.input.View()))
-		b.WriteString("\n" + styleHint.Render("  ↑↓ history/menu · tab accept · pgup/pgdn scroll · /copy · /exit"))
+		b.WriteString("\n" + styleHint.Render("  \"/\" commands  ·  \"@\" files  ·  ↑↓ history"))
 	}
 	return b.String()
 }

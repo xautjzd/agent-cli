@@ -45,7 +45,7 @@ func TestTUIRendersBoxAtBottom(t *testing.T) {
 	}
 	// The last non-empty content is the footer (box/hint), i.e. input is pinned
 	// at the bottom.
-	if !strings.Contains(view, "pgup/pgdn scroll") {
+	if !strings.Contains(view, "↑↓ history") {
 		t.Errorf("expected the footer hint at the bottom:\n%s", view)
 	}
 }
