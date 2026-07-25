@@ -150,14 +150,15 @@ func TestEffortArgCompletionMarksCurrent(t *testing.T) {
 // a value picker to open on submit ("/effort") from those that don't.
 func TestCommandCompletesArgs(t *testing.T) {
 	r, _, _ := newTestRepl(t, "")
-	// effort/theme/mode have static value sets, so the picker always opens.
+	// effort/mode have static value sets, so the picker always opens.
 	// (model/provider depend on catalog data and only open when non-empty.)
-	for _, cmd := range []string{"effort", "theme", "mode"} {
+	for _, cmd := range []string{"effort", "mode"} {
 		if !r.commandCompletesArgs(cmd) {
 			t.Errorf("commandCompletesArgs(%q) = false, want true", cmd)
 		}
 	}
-	for _, cmd := range []string{"new", "exit", "help", ""} {
+	// theme is intentionally excluded: it uses its own live-preview picker.
+	for _, cmd := range []string{"theme", "new", "exit", "help", ""} {
 		if r.commandCompletesArgs(cmd) {
 			t.Errorf("commandCompletesArgs(%q) = true, want false", cmd)
 		}

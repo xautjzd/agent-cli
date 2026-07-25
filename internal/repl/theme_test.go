@@ -40,18 +40,18 @@ func TestThemeCommandUnknown(t *testing.T) {
 	}
 }
 
-func TestThemeArgumentCandidates(t *testing.T) {
+// TestThemeHasNoInlineCompletion documents that /theme deliberately offers no
+// inline value completion — theme selection goes through its own full-screen
+// picker, which previews each theme live as the highlight moves (the inline
+// popup only applies on submit, so it cannot preview).
+func TestThemeHasNoInlineCompletion(t *testing.T) {
 	r, _, _ := newTestRepl(t, "")
 	value := "/theme dr"
-	cands := r.argumentCandidates(value, len("/theme "), len(value))
-	var found bool
-	for _, c := range cands {
-		if c.text == "dracula" {
-			found = true
-		}
+	if cands := r.argumentCandidates(value, len("/theme "), len(value)); cands != nil {
+		t.Errorf("theme should have no inline candidates, got %+v", cands)
 	}
-	if !found {
-		t.Errorf("dracula not offered for %q: %+v", value, cands)
+	if r.commandCompletesArgs("theme") {
+		t.Error("commandCompletesArgs(theme) = true; theme must route to its live-preview picker")
 	}
 }
 

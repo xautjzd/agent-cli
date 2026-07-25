@@ -8,7 +8,6 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/provider"
-	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
 // candidate is one completion suggestion shown in the popup.
@@ -209,11 +208,10 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 		}
 	case "model":
 		options = r.modelOptions(r.Cfg.Provider)
-	case "theme":
-		for _, n := range theme.Names() {
-			th, _ := theme.Get(n)
-			options = append(options, [2]string{n, th.Description})
-		}
+	// /theme deliberately has no inline value completion: it is selected via its
+	// own full-screen picker (opened by submitting "/theme"), which previews
+	// each theme live as the highlight moves — something the inline popup, which
+	// only applies on submit, cannot do.
 	case "mode":
 		options = append(options,
 			[2]string{"hitl", "dangerous operations require confirmation (default)"},
@@ -251,8 +249,6 @@ func (r *Repl) currentArgValue(cmd string) string {
 		return r.Cfg.Provider
 	case "model":
 		return r.Cfg.Model
-	case "theme":
-		return r.Cfg.Theme
 	case "mode":
 		return string(r.permMode())
 	}
