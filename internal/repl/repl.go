@@ -936,6 +936,17 @@ func (r *Repl) cmdModel(_ context.Context, args string) error {
 	}
 	r.Cfg.Model = args
 	r.Agent.SetModel(args)
+	// Re-seed the context window for the new model so the banner's context row
+	// (and compaction thresholds) track the switch. Only when the catalog knows
+	// the model's window — otherwise keep whatever limit is already in effect.
+	if w := catalog.ContextWindow(r.Cfg.Provider, args); w > 0 {
+		r.Cfg.ContextLimit = w
+		r.Agent.ContextLimit = w
+	}
+	// Re-render so the banner's model/context reflect the switch immediately.
+	// This resets the scrollback, so it must run before the confirmation line
+	// below (which would otherwise be wiped).
+	r.redrawTranscript()
 	fmt.Fprintf(r.Out, "Switched model to %s\n", args)
 	r.stripImagesIfNeeded()
 	return nil
