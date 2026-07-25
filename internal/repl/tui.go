@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -945,7 +946,7 @@ func (m *tuiModel) popupView() string {
 	}
 	for i := m.offset; i < end; i++ {
 		c := m.cands[i]
-		desc := c.desc
+		desc := capitalizeFirst(c.desc)
 		if c.current {
 			desc += " (current)"
 		}
@@ -988,6 +989,19 @@ func (m *tuiModel) View() string {
 }
 
 // truncPad truncates or right-pads s to n display columns.
+// capitalizeFirst upper-cases the first rune of s so popup descriptions read
+// as proper sentences, leaving the rest untouched.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r, size := utf8.DecodeRuneInString(s)
+	if r == utf8.RuneError {
+		return s
+	}
+	return string(unicode.ToUpper(r)) + s[size:]
+}
+
 func truncPad(s string, n int) string {
 	if lipgloss.Width(s) > n {
 		return lipgloss.NewStyle().MaxWidth(n).Render(s)
