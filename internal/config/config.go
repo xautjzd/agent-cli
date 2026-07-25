@@ -52,7 +52,7 @@ type Config struct {
 	// Provider selects the vendor: "openai", "deepseek", "custom", or the
 	// name of an entry in Providers.
 	Provider string `json:"provider"`
-	// Model is the model identifier, e.g. "gpt-4o" or "deepseek-chat".
+	// Model is the model identifier, e.g. "gpt-5.6-terra" or "deepseek-v4-flash".
 	Model string `json:"model"`
 	// APIKey authenticates against the provider. Prefer setting it via
 	// environment variable over storing it in the config file.
@@ -330,7 +330,11 @@ func LoadIn(projectDir string) (*Config, error) {
 		cfg.AutoCompact = "on"
 	}
 	if cfg.ContextLimit <= 0 {
-		cfg.ContextLimit = DefaultContextLimit
+		if w := catalog.ContextWindow(cfg.Provider, cfg.Model); w > 0 {
+			cfg.ContextLimit = w
+		} else {
+			cfg.ContextLimit = DefaultContextLimit
+		}
 	}
 	if cfg.Theme == "" {
 		cfg.Theme = theme.Default()
@@ -338,10 +342,11 @@ func LoadIn(projectDir string) (*Config, error) {
 	return cfg, nil
 }
 
-// DefaultContextLimit is the assumed usable context window (tokens) when the
-// config does not specify one. It is deliberately conservative so compaction
-// engages before a small-window model rejects the request; raise it via
-// "context_limit" for large-window models.
+// DefaultContextLimit is the fallback context window (tokens) used when the
+// config names no explicit limit and the model's window is unknown to the
+// catalog. Known models are seeded from catalog.ContextWindow instead. It is
+// deliberately conservative so compaction engages before a small-window model
+// rejects the request; override it via "context_limit" when needed.
 const DefaultContextLimit = 128000
 
 // mergeFile overlays one config file onto cfg. Scalars replace only when

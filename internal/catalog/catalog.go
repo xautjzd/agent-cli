@@ -42,6 +42,12 @@ type Provider struct {
 	DefaultModel string
 	// Models are known model identifiers, used for completion only.
 	Models []string
+	// ContextWindow is the documented context window (tokens) shared by most
+	// of this provider's models, used as the default ContextLimit when
+	// configuration names no explicit limit. Models that diverge from the
+	// family window are listed in modelContextWindows. Zero means unknown,
+	// which leaves the conservative global default in force.
+	ContextWindow int
 	// Vision marks providers whose listed models accept image input.
 	Vision bool
 	// Notes is a short hint shown in listings (where to get a key, etc.).
@@ -65,8 +71,11 @@ var presets = []Provider{
 			"claude-opus-4-8", "claude-sonnet-5", "claude-fable-5",
 			"claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5",
 		},
-		Vision: true,
-		Notes:  "console.anthropic.com",
+		// Claude 5 / Opus 4.x all ship a 1M window; Haiku 4.5 is the
+		// exception at 200K (see modelContextWindows).
+		ContextWindow: 1_000_000,
+		Vision:        true,
+		Notes:         "console.anthropic.com",
 	},
 	{
 		Name:         "openai",
@@ -74,10 +83,18 @@ var presets = []Provider{
 		BaseURL:      "https://api.openai.com/v1",
 		Format:       provider.FormatOpenAI,
 		EnvKeys:      []string{"OPENAI_API_KEY"},
-		DefaultModel: "gpt-5.6",
-		Models:       []string{"gpt-5.6", "gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-4o", "gpt-4o-mini"},
-		Vision:       true,
-		Notes:        "platform.openai.com",
+		DefaultModel: "gpt-5.6-terra",
+		// gpt-5.6 ships as three variants (sol/terra/luna); gpt-4o was dropped
+		// from the current catalog. Per developers.openai.com/api/docs/pricing.
+		Models: []string{
+			"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+			"gpt-5.5", "gpt-5.5-pro",
+			"gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro",
+			"gpt-5.3-codex",
+		},
+		ContextWindow: 1_000_000, // GPT-5 line (gpt-5.6 ~1.05M; others assumed 1M)
+		Vision:        true,
+		Notes:         "platform.openai.com",
 	},
 	{
 		Name:         "deepseek",
@@ -85,9 +102,12 @@ var presets = []Provider{
 		BaseURL:      "https://api.deepseek.com",
 		Format:       provider.FormatOpenAI,
 		EnvKeys:      []string{"DEEPSEEK_API_KEY"},
-		DefaultModel: "deepseek-chat",
-		Models:       []string{"deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro", "deepseek-v4-flash"},
-		Notes:        "platform.deepseek.com",
+		DefaultModel: "deepseek-v4-flash",
+		// deepseek-chat / deepseek-reasoner were deprecated 2026-07-24 (they
+		// map to the non-thinking / thinking modes of deepseek-v4-flash).
+		Models:        []string{"deepseek-v4-pro", "deepseek-v4-flash"},
+		ContextWindow: 1_000_000, // all V4 models: 1M
+		Notes:         "platform.deepseek.com",
 	},
 	{
 		Name:         "deepseek-anthropic",
@@ -107,8 +127,11 @@ var presets = []Provider{
 		Format:       provider.FormatOpenAI,
 		EnvKeys:      []string{"ZHIPU_API_KEY", "ZHIPUAI_API_KEY", "GLM_API_KEY"},
 		DefaultModel: "glm-4.6",
-		Models:       []string{"glm-5.2", "glm-5.1", "glm-5", "glm-4.7", "glm-4.6", "glm-4.6v", "glm-4.5-air"},
-		Notes:        "open.bigmodel.cn",
+		// Per docs.bigmodel.cn model-overview. Most GLM models are 200K;
+		// glm-5.2 (1M) and glm-4.5-air (128K) diverge (see modelContextWindows).
+		Models:        []string{"glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.6", "glm-4.5-air"},
+		ContextWindow: 200_000, // GLM family default
+		Notes:         "open.bigmodel.cn",
 	},
 	{
 		Name:         "glm-anthropic",
@@ -126,10 +149,14 @@ var presets = []Provider{
 		Label:        "Moonshot Kimi",
 		BaseURL:      "https://api.moonshot.cn/v1",
 		Format:       provider.FormatOpenAI,
-		EnvKeys:      []string{"MOONSHOT_API_KEY", "KIMI_API_KEY"},
-		DefaultModel: "kimi-k2-turbo-preview",
-		Models:       []string{"kimi-k3", "kimi-k2.6", "kimi-k2-thinking", "kimi-k2-turbo-preview", "moonshot-v1-128k"},
-		Notes:        "platform.moonshot.cn",
+		EnvKeys:       []string{"MOONSHOT_API_KEY", "KIMI_API_KEY"},
+		DefaultModel: "kimi-k3",
+		// The kimi-k2-* variants were discontinued 2026-05-25; these are the
+		// current models per platform.kimi.com/docs/models. moonshot-v1-128k
+		// is kept for existing users (closed to new registrations).
+		Models:        []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5", "moonshot-v1-128k"},
+		ContextWindow: 256_000, // Kimi K2.x family; kimi-k3 and moonshot-v1-128k differ (see modelContextWindows)
+		Notes:         "platform.kimi.com",
 	},
 	{
 		Name:         "kimi-anthropic",
@@ -153,8 +180,9 @@ var presets = []Provider{
 			"qwen3.7-max", "qwen3.7-plus", "qwen3-max", "qwen3-coder-plus",
 			"qwen-max", "qwen-plus", "qwen-turbo", "qwen3-vl-plus",
 		},
-		Vision: true,
-		Notes:  "bailian.console.aliyun.com",
+		ContextWindow: 256_000, // qwen-max window; 1M and 131K models pinned below
+		Vision:        true,
+		Notes:         "bailian.console.aliyun.com",
 	},
 	{
 		Name:         "dashscope-intl",
@@ -162,9 +190,10 @@ var presets = []Provider{
 		BaseURL:      "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
 		Format:       provider.FormatOpenAI,
 		EnvKeys:      []string{"DASHSCOPE_API_KEY"},
-		DefaultModel: "qwen-max",
-		Models:       []string{"qwen3.7-max", "qwen3.7-plus", "qwen3-max", "qwen3-coder-plus", "qwen-max", "qwen-plus"},
-		Notes:        "Singapore region",
+		DefaultModel:  "qwen-max",
+		Models:        []string{"qwen3.7-max", "qwen3.7-plus", "qwen3-max", "qwen3-coder-plus", "qwen-max", "qwen-plus"},
+		ContextWindow: 256_000, // matches dashscope
+		Notes:         "Singapore region",
 	},
 	{
 		Name:         "openrouter",
@@ -177,8 +206,11 @@ var presets = []Provider{
 			"openai/gpt-5.6", "anthropic/claude-opus-4-8", "x-ai/grok-4.5",
 			"deepseek/deepseek-chat", "google/gemini-2.5-pro",
 		},
-		Vision: true,
-		Notes:  "aggregator; model names are namespaced",
+		// Aggregator: windows are per-underlying-model, so the divergent
+		// ones are pinned in modelContextWindows; this is the fallback.
+		ContextWindow: 128_000,
+		Vision:        true,
+		Notes:         "aggregator; model names are namespaced",
 	},
 	{
 		Name:         "siliconflow",
@@ -186,20 +218,22 @@ var presets = []Provider{
 		Label:        "SiliconFlow",
 		BaseURL:      "https://api.siliconflow.cn/v1",
 		Format:       provider.FormatOpenAI,
-		EnvKeys:      []string{"SILICONFLOW_API_KEY"},
-		DefaultModel: "deepseek-ai/DeepSeek-V3",
-		Models:       []string{"deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"},
-		Notes:        "cloud.siliconflow.cn",
+		EnvKeys:       []string{"SILICONFLOW_API_KEY"},
+		DefaultModel:  "deepseek-ai/DeepSeek-V3",
+		Models:        []string{"deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"},
+		ContextWindow: 131_072, // DeepSeek-V3 / Qwen2.5 family
+		Notes:         "cloud.siliconflow.cn",
 	},
 	{
 		Name:         "ollama",
 		Label:        "Ollama (local)",
 		BaseURL:      "http://localhost:11434/v1",
 		Format:       provider.FormatOpenAI,
-		EnvKeys:      []string{"OLLAMA_API_KEY"},
-		DefaultModel: "qwen2.5-coder",
-		Models:       []string{"qwen2.5-coder", "llama3.3", "qwen2.5-vl"},
-		Notes:        "no API key required",
+		EnvKeys:       []string{"OLLAMA_API_KEY"},
+		DefaultModel:  "qwen2.5-coder",
+		Models:        []string{"qwen2.5-coder", "llama3.3", "qwen2.5-vl"},
+		ContextWindow: 32_768, // local models default to a modest window
+		Notes:         "no API key required",
 	},
 }
 
@@ -226,7 +260,43 @@ func init() {
 		if v.Models == nil {
 			v.Models = base.Models
 		}
+		if v.ContextWindow == 0 {
+			v.ContextWindow = base.ContextWindow
+		}
 	}
+}
+
+// modelContextWindows pins the context window (tokens) for individual models
+// whose window differs from their provider's family default. Keyed by the
+// exact model identifier. Entries here win over the provider ContextWindow.
+var modelContextWindows = map[string]int{
+	"claude-haiku-4-5": 200_000, // 200K while the rest of the Claude line is 1M
+
+	// GLM: family default is 200K; glm-5.2 / glm-4-long are 1M, the
+	// glm-4.5-air tier is 128K.
+	"glm-5.2":      1_000_000,
+	"glm-4-long":   1_000_000,
+	"glm-4.5-air":  128_000,
+	"glm-4.5-airx": 128_000,
+
+	// Kimi: K2 family is 256K (the provider default); K3 is 1M and the
+	// legacy moonshot-v1-128k is narrower.
+	"kimi-k3":          1_000_000,
+	"moonshot-v1-128k": 128_000,
+
+	// Qwen: family default is 256K (qwen-max); the qwen3 flagships and
+	// qwen-plus are 1M, qwen-turbo is 131K.
+	"qwen3.7-max":  1_000_000,
+	"qwen3.7-plus": 1_000_000,
+	"qwen3-max":    1_000_000,
+	"qwen-plus":    1_000_000,
+	"qwen-turbo":   131_072,
+
+	// OpenRouter models are namespaced and each carries its underlying
+	// vendor's window, not the aggregator's conservative default.
+	"anthropic/claude-opus-4-8": 1_000_000,
+	"google/gemini-2.5-pro":     1_000_000,
+	"x-ai/grok-4.5":             500_000,
 }
 
 // index maps every canonical name and alias to its preset.
@@ -274,6 +344,28 @@ func ModelsFor(name string) []string {
 		return p.Models
 	}
 	return nil
+}
+
+// ContextWindow returns the documented context window (tokens) for a model,
+// or 0 when it cannot be determined. It is used to seed ContextLimit when
+// configuration names no explicit limit; an explicit "context_limit" always
+// wins. Resolution order: a per-model override, then the family window of the
+// provider the model belongs to, then the family window of the configured
+// provider (which covers custom model names on a known provider).
+func ContextWindow(providerName, model string) int {
+	if w, ok := modelContextWindows[model]; ok {
+		return w
+	}
+	// The model itself is the strongest signal of its family.
+	if name, ok := ProviderForModel(model); ok {
+		if p, ok := Lookup(name); ok && p.ContextWindow > 0 {
+			return p.ContextWindow
+		}
+	}
+	if p, ok := Lookup(providerName); ok {
+		return p.ContextWindow
+	}
+	return 0
 }
 
 // ProviderForModel returns the canonical name of the built-in provider whose

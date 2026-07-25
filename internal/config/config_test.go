@@ -28,7 +28,7 @@ func TestLoadDefaultsAndEnvOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Provider != "deepseek" || cfg.Model != "deepseek-chat" || cfg.MaxTurns != 40 {
+	if cfg.Provider != "deepseek" || cfg.Model != "deepseek-v4-flash" || cfg.MaxTurns != 40 {
 		t.Errorf("defaults wrong: %+v", cfg)
 	}
 
@@ -38,7 +38,7 @@ func TestLoadDefaultsAndEnvOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Provider != "openai" || cfg.Model != "gpt-5.6" || cfg.APIKey != "sk-test" {
+	if cfg.Provider != "openai" || cfg.Model != "gpt-5.6-terra" || cfg.APIKey != "sk-test" {
 		t.Errorf("env override wrong: %+v", cfg)
 	}
 }
@@ -46,7 +46,7 @@ func TestLoadDefaultsAndEnvOverride(t *testing.T) {
 func TestLoadForDropsStaleVendorSettings(t *testing.T) {
 	isolateHome(t)
 	// File config is bound to deepseek with its key and model.
-	base := &Config{Provider: "deepseek", Model: "deepseek-chat", APIKey: "ds-key", MaxTurns: 40}
+	base := &Config{Provider: "deepseek", Model: "deepseek-v4-flash", APIKey: "ds-key", MaxTurns: 40}
 	if err := base.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestLoadForDropsStaleVendorSettings(t *testing.T) {
 	if cfg.APIKey != "oa-key" {
 		t.Errorf("stale key leaked across providers: %q", cfg.APIKey)
 	}
-	if cfg.Model != "gpt-5.6" {
+	if cfg.Model != "gpt-5.6-terra" {
 		t.Errorf("model not re-defaulted: %q", cfg.Model)
 	}
 
@@ -71,20 +71,20 @@ func TestLoadForDropsStaleVendorSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.APIKey != "ds-key" || cfg.Model != "deepseek-chat" {
+	if cfg.APIKey != "ds-key" || cfg.Model != "deepseek-v4-flash" {
 		t.Errorf("same-provider load lost settings: %+v", cfg)
 	}
 }
 
 func TestProjectConfigOverridesGlobal(t *testing.T) {
 	isolateHome(t)
-	global := &Config{Provider: "deepseek", Model: "deepseek-chat", MaxTurns: 40, PermissionMode: "hitl"}
+	global := &Config{Provider: "deepseek", Model: "deepseek-v4-flash", MaxTurns: 40, PermissionMode: "hitl"}
 	if err := global.Save(); err != nil {
 		t.Fatal(err)
 	}
 
 	proj := t.TempDir()
-	if err := SetScoped(ScopeProject, proj, "model", "deepseek-reasoner"); err != nil {
+	if err := SetScoped(ScopeProject, proj, "model", "deepseek-v4-pro"); err != nil {
 		t.Fatal(err)
 	}
 	if err := SetScoped(ScopeProject, proj, "permission_mode", "bypass"); err != nil {
@@ -95,7 +95,7 @@ func TestProjectConfigOverridesGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Model != "deepseek-reasoner" || cfg.PermissionMode != "bypass" {
+	if cfg.Model != "deepseek-v4-pro" || cfg.PermissionMode != "bypass" {
 		t.Errorf("project overrides not applied: %+v", cfg)
 	}
 	if cfg.Provider != "deepseek" {
@@ -107,7 +107,7 @@ func TestProjectConfigOverridesGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if other.Model != "deepseek-chat" || other.PermissionMode != "hitl" {
+	if other.Model != "deepseek-v4-flash" || other.PermissionMode != "hitl" {
 		t.Errorf("project file leaked into other dir: %+v", other)
 	}
 }

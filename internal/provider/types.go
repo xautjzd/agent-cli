@@ -45,7 +45,7 @@ type Message struct {
 	// it answers. Required by the API when Role == RoleTool.
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	// ReasoningContent carries chain-of-thought from reasoning models
-	// (e.g. deepseek-reasoner). It is display-only: the agent must clear
+	// (e.g. deepseek-v4-pro thinking mode). It is display-only: the agent must clear
 	// it before appending the message to history, since providers reject
 	// or ignore reasoning echoed back as context.
 	ReasoningContent string `json:"reasoning_content,omitempty"`

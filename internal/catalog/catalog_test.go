@@ -140,3 +140,35 @@ func TestAllReturnsACopy(t *testing.T) {
 		t.Error("mutation leaked into Names()")
 	}
 }
+
+func TestContextWindowResolution(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		model    string
+		want     int
+	}{
+		{"anthropic family 1M", "anthropic", "claude-opus-4-8", 1_000_000},
+		{"haiku override", "anthropic", "claude-haiku-4-5", 200_000},
+		{"anthropic-compatible inherits deepseek 1M", "deepseek-anthropic", "deepseek-v4-flash", 1_000_000},
+		{"kimi family default", "kimi", "kimi-k2.6", 256_000},
+		{"kimi k3 override to 1M", "kimi", "kimi-k3", 1_000_000},
+		{"moonshot override narrower", "kimi", "moonshot-v1-128k", 128_000},
+		{"openai GPT-5 family 1M", "openai", "gpt-5.6-sol", 1_000_000},
+		{"qwen flagship override", "dashscope", "qwen3.7-max", 1_000_000},
+		{"qwen-max family default", "dashscope", "qwen-max", 256_000},
+		{"grok override", "openrouter", "x-ai/grok-4.5", 500_000},
+		{"openrouter namespaced model wins over aggregator default", "openrouter", "anthropic/claude-opus-4-8", 1_000_000},
+		{"openrouter falls back to family default", "openrouter", "openai/gpt-5.6", 128_000},
+		{"model signals its own family regardless of provider", "openai", "claude-opus-4-8", 1_000_000},
+		{"unknown model on known provider uses family", "deepseek", "deepseek-v99", 1_000_000},
+		{"unknown provider and model", "mystery-gateway", "mystery-model", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ContextWindow(c.provider, c.model); got != c.want {
+				t.Errorf("ContextWindow(%q, %q) = %d, want %d", c.provider, c.model, got, c.want)
+			}
+		})
+	}
+}

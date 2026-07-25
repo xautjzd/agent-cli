@@ -1043,7 +1043,7 @@ func runConfig(args []string) error {
 		}
 		return nil
 	case "init":
-		cfg := &config.Config{Provider: "deepseek", Model: "deepseek-chat", MaxTurns: 40}
+		cfg := &config.Config{Provider: "deepseek", Model: "deepseek-v4-flash", MaxTurns: 40}
 		if err := cfg.Save(); err != nil {
 			return err
 		}

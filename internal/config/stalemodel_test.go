@@ -26,11 +26,11 @@ func TestStaleModelReplacedByProfileModel(t *testing.T) {
 func TestOwnModelKept(t *testing.T) {
 	cfg := &Config{
 		Provider:  "deepseek",
-		Model:     "deepseek-chat",
+		Model:     "deepseek-v4-flash",
 		Providers: map[string]ProviderConfig{"deepseek": {BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"}},
 	}
 	resolveProfile(cfg)
-	if cfg.Model != "deepseek-chat" {
+	if cfg.Model != "deepseek-v4-flash" {
 		t.Errorf("an explicit valid model must be kept, got %q", cfg.Model)
 	}
 }

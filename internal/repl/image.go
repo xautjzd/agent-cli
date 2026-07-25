@@ -19,7 +19,7 @@ import (
 
 // Multimodal input support: images pasted with Ctrl+V (or referenced with
 // @path) are attached as base64 data-URL parts in the OpenAI vision format.
-// Requires a vision-capable model (e.g. gpt-4o); text-only models reject
+// Requires a vision-capable model (e.g. gpt-5.6-terra); text-only models reject
 // content arrays with images.
 
 // mimeTypes maps image extensions to their MIME type for data URLs.
@@ -95,8 +95,8 @@ func (r *Repl) prepareImageMessage(ctx context.Context, msg provider.Message) (p
 	}
 	if r.Cfg.VisionModel == "" {
 		return provider.Message{}, fmt.Errorf(
-			"model %q cannot read images; either switch to a vision model (/provider openai gpt-4o or /model <vision-model>), "+
-				"or configure a fallback that describes images for it: /config set vision_provider openai · /config set vision_model gpt-4o-mini "+
+			"model %q cannot read images; either switch to a vision model (/provider openai gpt-5.6-terra or /model <vision-model>), "+
+				"or configure a fallback that describes images for it: /config set vision_provider openai · /config set vision_model gpt-5.6-luna "+
 				"(for unrecognized vision models on custom endpoints, mark the profile with \"vision\": true)",
 			r.Cfg.Model)
 	}

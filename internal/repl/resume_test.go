@@ -312,9 +312,9 @@ func TestSessionLabelsAlignMixedScripts(t *testing.T) {
 		{Title: "你是什么模型", Model: "glm-5.2", MessageCount: 6, UpdatedAt: now.Add(-25 * time.Minute)},
 		{Title: "hello", Model: "glm-5.2", MessageCount: 9, UpdatedAt: now.Add(-38 * time.Minute)},
 		{Title: "https://ws-mkh2yc3hngbq7zqg.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
-			Model: "deepseek-chat", MessageCount: 2, UpdatedAt: now.Add(-time.Hour)},
+			Model: "deepseek-v4-flash", MessageCount: 2, UpdatedAt: now.Add(-time.Hour)},
 		{Title: "我要支持输入token与输出token展示以及耗时展示",
-			Model: "deepseek-chat", MessageCount: 23, UpdatedAt: now.Add(-9 * time.Hour)},
+			Model: "deepseek-v4-flash", MessageCount: 23, UpdatedAt: now.Add(-9 * time.Hour)},
 		{Title: "删除 Readme", Model: "deepseek-v4-pro", MessageCount: 8, UpdatedAt: now.Add(-8 * time.Hour)},
 	}
 
@@ -394,8 +394,8 @@ func titlePrefix(s string) string {
 func TestSessionLabelsNarrowTerminal(t *testing.T) {
 	// A cramped window must still produce usable, non-overflowing rows.
 	metas := []session.Meta{
-		{Title: "一个比较长的中文标题内容", Model: "deepseek-chat", MessageCount: 4, UpdatedAt: time.Now()},
-		{Title: "hi", Model: "deepseek-chat", MessageCount: 1, UpdatedAt: time.Now()},
+		{Title: "一个比较长的中文标题内容", Model: "glm-4.6", MessageCount: 4, UpdatedAt: time.Now()},
+		{Title: "hi", Model: "glm-4.6", MessageCount: 1, UpdatedAt: time.Now()},
 	}
 	labels := sessionLabels(metas, 20) // below the floor; clamped internally
 	for i, l := range labels {

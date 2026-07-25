@@ -18,15 +18,24 @@ import (
 	"time"
 )
 
-// Price is a model's cost in USD per one million tokens.
+// Price is a model's cost in USD per one million tokens. Input and output are
+// billed at different rates, so the two are tracked separately.
 type Price struct {
-	InputPerM  float64
+	// InputPerM is the USD cost per 1M input (prompt) tokens.
+	InputPerM float64
+	// OutputPerM is the USD cost per 1M output (completion) tokens, usually
+	// several times higher than the input rate.
 	OutputPerM float64
 }
 
 // prices is the built-in, approximate price table (USD per 1M tokens). The
 // Anthropic figures are authoritative; the others are public list prices that
 // vendors change over time — treat the dollar estimates as a guide.
+//
+// Each entry is written as {InputPerM, OutputPerM}: the first number is the
+// input/prompt rate, the second is the output/completion rate. For example,
+// "claude-opus-4-8": {5, 25} means $5 per 1M input tokens and $25 per 1M
+// output tokens.
 var prices = map[string]Price{
 	// Anthropic (Messages API).
 	"claude-opus-4-8":   {5, 25},
@@ -37,14 +46,30 @@ var prices = map[string]Price{
 	"claude-haiku-4-5":  {1, 5},
 	"claude-fable-5":    {10, 50},
 	"claude-mythos-5":   {10, 50},
-	// OpenAI (approximate).
-	"gpt-4o":       {2.5, 10},
-	"gpt-4o-mini":  {0.15, 0.6},
-	"gpt-4.1":      {2, 8},
-	"gpt-4.1-mini": {0.4, 1.6},
+	// OpenAI (standard tier; from developers.openai.com/api/docs/pricing).
+	"gpt-5.6-sol":   {5, 30},
+	"gpt-5.6-terra": {2.5, 15},
+	"gpt-5.6-luna":  {1, 6},
+	"gpt-5.5":       {5, 30},
+	"gpt-5.5-pro":   {30, 180},
+	"gpt-5.4":       {2.5, 15},
+	"gpt-5.4-mini":  {0.75, 4.5},
+	"gpt-5.4-nano":  {0.2, 1.25},
+	"gpt-5.4-pro":   {30, 180},
+	"gpt-5.3-codex": {1.75, 14},
 	// DeepSeek (approximate, cache-miss rate).
-	"deepseek-chat":     {0.27, 1.10},
-	"deepseek-reasoner": {0.55, 2.19},
+	"deepseek-v4-flash": {0.14, 0.28},
+	"deepseek-v4-pro":   {0.435, 0.87},
+	// Zhipu GLM (from bigmodel.cn/pricing, RMB standard/base tier — input
+	// length [0,32) — converted to USD at 6.7819 CNY/USD).
+	"glm-5.2":        {1.1796, 4.1286},
+	"glm-5.1":        {0.8847, 3.5388},
+	"glm-5-turbo":    {0.7373, 3.2439},
+	"glm-5":          {0.5898, 2.6541},
+	"glm-4.7":        {0.2949, 1.1796},
+	"glm-4.7-flashx": {0.0737, 0.4424},
+	"glm-4.7-flash":  {0, 0}, // free tier
+	"glm-4.5-air":    {0.1180, 0.2949},
 }
 
 // overrides holds user-configured prices (from config.json "prices"). They

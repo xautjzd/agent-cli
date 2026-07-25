@@ -18,7 +18,7 @@ func TestFileStoreRoundTrip(t *testing.T) {
 	}
 
 	s1 := &Session{
-		Meta: Meta{ID: "20260720-100000-aaaa", Title: "first task", Provider: "deepseek", Model: "deepseek-chat", CreatedAt: time.Now()},
+		Meta: Meta{ID: "20260720-100000-aaaa", Title: "first task", Provider: "deepseek", Model: "deepseek-v4-flash", CreatedAt: time.Now()},
 		Messages: []Record{
 			{Message: provider.Message{Role: provider.RoleUser, Content: "hello"}, Display: "hello typed"},
 			{Message: provider.Message{Role: provider.RoleAssistant, Content: "hi"}},

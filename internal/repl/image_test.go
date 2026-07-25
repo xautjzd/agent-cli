@@ -142,7 +142,7 @@ func TestStripImagePartsOnModelSwitch(t *testing.T) {
 
 	// Switching to a text-only model must scrub image parts from history so
 	// later requests are not rejected.
-	if err := r.dispatch(context.Background(), "/model deepseek-chat"); err != nil {
+	if err := r.dispatch(context.Background(), "/model deepseek-v4-flash"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "image message(s) in history replaced") {

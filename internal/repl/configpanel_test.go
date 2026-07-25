@@ -107,16 +107,16 @@ func TestConfigPanelEnterEditsText(t *testing.T) {
 	if m.editor.Value() == "" {
 		t.Error("editor should pre-fill the current model")
 	}
-	m.editor.SetValue("deepseek-reasoner")
+	m.editor.SetValue("deepseek-v4-pro")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // commit
 	if m.editing {
 		t.Error("editor still open after commit")
 	}
-	if m.repl.Cfg.Model != "deepseek-reasoner" {
-		t.Errorf("model = %q, want deepseek-reasoner", m.repl.Cfg.Model)
+	if m.repl.Cfg.Model != "deepseek-v4-pro" {
+		t.Errorf("model = %q, want deepseek-v4-pro", m.repl.Cfg.Model)
 	}
 	cfg, _ := config.LoadIn("")
-	if cfg.Model != "deepseek-reasoner" {
+	if cfg.Model != "deepseek-v4-pro" {
 		t.Errorf("model not persisted: %q", cfg.Model)
 	}
 
@@ -125,7 +125,7 @@ func TestConfigPanelEnterEditsText(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m.editor.SetValue("scrapped")
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.repl.Cfg.Model != "deepseek-reasoner" {
+	if m.repl.Cfg.Model != "deepseek-v4-pro" {
 		t.Errorf("Esc did not cancel the edit: %q", m.repl.Cfg.Model)
 	}
 }

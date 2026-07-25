@@ -29,7 +29,7 @@ func TestRecorderAggregates(t *testing.T) {
 	r.Record("anthropic", "claude-opus-4-8", 1000, 2000, time.Second)
 	r.Record("anthropic", "claude-opus-4-8", 500, 1000, time.Second)
 	r.Record("anthropic", "claude-haiku-4-5", 100, 200, time.Second)
-	r.Record("deepseek", "deepseek-chat", 300, 400, time.Second)
+	r.Record("deepseek", "deepseek-v4-flash", 300, 400, time.Second)
 
 	in, out, reqs, dur, cost, priced := r.Totals()
 	if in != 1900 || out != 3600 {
