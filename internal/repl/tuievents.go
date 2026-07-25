@@ -88,9 +88,13 @@ const editDiffMaxLines = 40
 
 func (e *tuiEvents) OnTurnStats(s agent.TurnStats) {
 	th := theme.Current()
+	ctx := fmt.Sprintf("context %d tok", s.ContextTokens)
+	if pct := s.ContextPercent(); pct >= 0 {
+		ctx = fmt.Sprintf("context %d/%d tok (%d%%)", s.ContextTokens, s.ContextLimit, pct)
+	}
 	fmt.Fprintf(e.out, "%s\n", th.Paint(th.Muted, fmt.Sprintf(
-		"⏱ %s · %d in + %d out · context %d tok",
-		s.Duration.Round(time.Millisecond), s.PromptTokens, s.CompletionTokens, s.ContextTokens)))
+		"⏱ %s · %d in + %d out · %s",
+		s.Duration.Round(time.Millisecond), s.PromptTokens, s.CompletionTokens, ctx)))
 }
 
 // StreamEvents: fragments append live; the scrollback notify drives the redraw.

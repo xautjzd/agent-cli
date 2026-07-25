@@ -392,6 +392,48 @@ func TestTurnStatsAccumulate(t *testing.T) {
 	}
 }
 
+func TestTurnStatsContextPercent(t *testing.T) {
+	cases := []struct {
+		name   string
+		tokens int
+		limit  int
+		want   int
+	}{
+		{"unknown limit", 5000, 0, -1},
+		{"half full", 64000, 128000, 50},
+		{"rounds up", 1, 3, 33},
+		{"empty context", 0, 128000, 0},
+		{"over limit", 130000, 128000, 102},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := TurnStats{ContextTokens: c.tokens, ContextLimit: c.limit}
+			if got := s.ContextPercent(); got != c.want {
+				t.Errorf("ContextPercent() = %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
+func TestTurnStatsCarriesContextLimit(t *testing.T) {
+	fake := &fakeProvider{responses: []provider.Response{{
+		Message: provider.Message{Role: provider.RoleAssistant, Content: "done"},
+		Usage:   provider.Usage{PromptTokens: 100, CompletionTokens: 20},
+	}}}
+	ev := &recordingEvents{}
+	ag := New(fake, "m", tool.NewRegistry(), "sys", ev, 5)
+	ag.ContextLimit = 200000
+	if _, err := ag.Run(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	if len(ev.stats) != 1 {
+		t.Fatalf("expected 1 stats event, got %d", len(ev.stats))
+	}
+	if got := ev.stats[0].ContextLimit; got != 200000 {
+		t.Errorf("ContextLimit = %d, want 200000", got)
+	}
+}
+
 func TestConversationPersistsAcrossRuns(t *testing.T) {
 	fake := &fakeProvider{}
 	ag := New(fake, "m", tool.NewRegistry(), "sys", nil, 5)

@@ -421,3 +421,25 @@ func TestTUINormalExitStillQuits(t *testing.T) {
 		t.Fatal("done=true without an interrupt should quit")
 	}
 }
+
+// TestAbbrevTokens covers the compact context-window labels shown in the
+// banner (128000 → "128K", exact millions → "1M", fractional → "1.5M").
+func TestAbbrevTokens(t *testing.T) {
+	cases := []struct {
+		in   int
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{128000, "128K"},
+		{200000, "200K"},
+		{1500, "1.5K"},
+		{1000000, "1M"},
+		{1500000, "1.5M"},
+	}
+	for _, c := range cases {
+		if got := abbrevTokens(c.in); got != c.want {
+			t.Errorf("abbrevTokens(%d) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

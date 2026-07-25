@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -64,12 +65,26 @@ type TurnStats struct {
 	// occupancy: the prompt of the latest request plus its completion —
 	// i.e. what the next request will roughly start from.
 	ContextTokens int
+	// ContextLimit is the model's usable context window in tokens, carried
+	// alongside ContextTokens so the UI can render occupancy as a fraction
+	// of the window. 0 means the limit is unknown/unconfigured.
+	ContextLimit int
 	// Rounds is the number of model round-trips in this turn.
 	Rounds   int
 	Duration time.Duration
 	// SessionTokens/SessionDuration accumulate across the whole session.
 	SessionTokens   int
 	SessionDuration time.Duration
+}
+
+// ContextPercent returns the conversation's context occupancy as a
+// whole-number percentage of the model's window, or -1 when the window size
+// is unknown (so callers can omit the percentage rather than divide by zero).
+func (s TurnStats) ContextPercent() int {
+	if s.ContextLimit <= 0 {
+		return -1
+	}
+	return int(math.Round(float64(s.ContextTokens) / float64(s.ContextLimit) * 100))
 }
 
 // Gate is consulted before every tool call, letting a permission layer
@@ -493,6 +508,7 @@ func (a *Agent) complete(ctx context.Context, req provider.Request) (*provider.R
 func (a *Agent) finishTurn(stats *TurnStats, start time.Time) {
 	stats.Duration = time.Since(start)
 	stats.ContextTokens = a.contextTokens
+	stats.ContextLimit = a.ContextLimit
 	a.sessionTokens += stats.TotalTokens
 	a.sessionDuration += stats.Duration
 	stats.SessionTokens = a.sessionTokens

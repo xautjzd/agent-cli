@@ -192,6 +192,7 @@ func (r *Repl) printBanner(w io.Writer) {
 		label("provider", r.Cfg.Provider),
 		label("model", r.Cfg.Model),
 		label("effort", string(effort)),
+		label("context", abbrevTokens(r.Cfg.ContextLimit)+" tokens"),
 		label("cwd", abbrevHome(r.WorkDir)),
 	}
 	box := lipgloss.NewStyle().
@@ -202,6 +203,25 @@ func (r *Repl) printBanner(w io.Writer) {
 
 	fmt.Fprintln(w, box)
 	fmt.Fprintf(w, "%s\n", th.Paint(th.Muted, "Type a task · \"@path\" to reference files · \"/\" for commands · /exit to quit"))
+}
+
+// abbrevTokens renders a context-window size compactly (128000 → "128K",
+// 1500000 → "1.5M"), the way coding agents label a model's total window.
+func abbrevTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		if n%1_000_000 == 0 {
+			return fmt.Sprintf("%dM", n/1_000_000)
+		}
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		if n%1_000 == 0 {
+			return fmt.Sprintf("%dK", n/1_000)
+		}
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 // abbrevHome shortens a path under the user's home directory to a leading "~",

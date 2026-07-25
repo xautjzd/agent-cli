@@ -685,11 +685,11 @@ const maxDiffLines = 40
 func (e *terminalEvents) OnTurnStats(s agent.TurnStats) {
 	th := theme.Current()
 	fmt.Fprintf(e.out, "%s\n", th.Paint(th.Muted, fmt.Sprintf(
-		"⏱ %s · turn: %s in + %s out (%d round%s) · context: %s tok · session: %s tok, %s",
+		"⏱ %s · turn: %s in + %s out (%d round%s) · context: %s · session: %s tok, %s",
 		formatDuration(s.Duration),
 		formatTokens(s.PromptTokens), formatTokens(s.CompletionTokens),
 		s.Rounds, plural(s.Rounds),
-		formatTokens(s.ContextTokens),
+		formatContext(s),
 		formatTokens(s.SessionTokens), formatDuration(s.SessionDuration))))
 }
 
@@ -703,6 +703,17 @@ func (e *terminalEvents) OnCompaction(s agent.CompactionStats) {
 		s.SummarizedMessages, plural(s.SummarizedMessages),
 		formatTokens(s.SummaryChars),
 		s.MessagesBefore, s.MessagesAfter)))
+}
+
+// formatContext renders context occupancy as "used/window tok (pct%)" when the
+// window size is known, or just "used tok" when it is not — the fraction of the
+// model's context window mainstream coding agents surface after each turn.
+func formatContext(s agent.TurnStats) string {
+	if pct := s.ContextPercent(); pct >= 0 {
+		return fmt.Sprintf("%s/%s tok (%d%%)",
+			formatTokens(s.ContextTokens), formatTokens(s.ContextLimit), pct)
+	}
+	return formatTokens(s.ContextTokens) + " tok"
 }
 
 // formatTokens renders counts with thousands separators (12,345).
