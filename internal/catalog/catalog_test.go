@@ -65,6 +65,21 @@ func TestAnthropicFormatPresetsHaveEndpoints(t *testing.T) {
 	}
 }
 
+func TestAnthropicVariantsShareTheirBaseModelList(t *testing.T) {
+	for _, p := range All() {
+		base, ok := Lookup(strings.TrimSuffix(p.Name, "-anthropic"))
+		if !ok || !strings.HasSuffix(p.Name, "-anthropic") || base.Name == p.Name {
+			continue
+		}
+		if p.DefaultModel != base.DefaultModel {
+			t.Errorf("%s default model %q != base %s %q", p.Name, p.DefaultModel, base.Name, base.DefaultModel)
+		}
+		if strings.Join(p.Models, ",") != strings.Join(base.Models, ",") {
+			t.Errorf("%s models %v != base %s models %v", p.Name, p.Models, base.Name, base.Models)
+		}
+	}
+}
+
 func TestLookupByNameAndAlias(t *testing.T) {
 	p, ok := Lookup("glm")
 	if !ok || p.Name != "glm" {

@@ -96,9 +96,8 @@ var presets = []Provider{
 		Format:       provider.FormatAnthropic,
 		Auth:         provider.AuthBearer,
 		EnvKeys:      []string{"ANTHROPIC_AUTH_TOKEN", "DEEPSEEK_API_KEY"},
-		DefaultModel: "deepseek-chat",
-		Models:       []string{"deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"},
-		Notes:        "Claude-Code-compatible endpoint",
+		// DefaultModel and Models are inherited from "deepseek" (see init).
+		Notes: "Claude-Code-compatible endpoint",
 	},
 	{
 		Name:         "glm",
@@ -118,9 +117,8 @@ var presets = []Provider{
 		Format:       provider.FormatAnthropic,
 		Auth:         provider.AuthBearer,
 		EnvKeys:      []string{"ANTHROPIC_AUTH_TOKEN", "ZHIPU_API_KEY", "ZHIPUAI_API_KEY", "GLM_API_KEY"},
-		DefaultModel: "glm-4.6",
-		Models:       []string{"glm-5.2", "glm-5.1", "glm-4.7", "glm-4.6"},
-		Notes:        "Claude-Code-compatible endpoint",
+		// DefaultModel and Models are inherited from "glm" (see init).
+		Notes: "Claude-Code-compatible endpoint",
 	},
 	{
 		Name:         "kimi",
@@ -140,9 +138,8 @@ var presets = []Provider{
 		Format:       provider.FormatAnthropic,
 		Auth:         provider.AuthBearer,
 		EnvKeys:      []string{"ANTHROPIC_AUTH_TOKEN", "MOONSHOT_API_KEY"},
-		DefaultModel: "kimi-k2-turbo-preview",
-		Models:       []string{"kimi-k3", "kimi-k2-thinking", "kimi-k2-turbo-preview"},
-		Notes:        "Claude-Code-compatible endpoint",
+		// DefaultModel and Models are inherited from "kimi" (see init).
+		Notes: "Claude-Code-compatible endpoint",
 	},
 	{
 		Name:         "dashscope",
@@ -204,6 +201,32 @@ var presets = []Provider{
 		Models:       []string{"qwen2.5-coder", "llama3.3", "qwen2.5-vl"},
 		Notes:        "no API key required",
 	},
+}
+
+// anthropicSuffix marks a preset as the Anthropic-compatible ("Claude Code")
+// variant of the base provider that shares its name without the suffix.
+const anthropicSuffix = "-anthropic"
+
+// init makes every "<base>-anthropic" variant inherit its DefaultModel and
+// Models from "<base>" when it does not set them itself. The two endpoints
+// serve the same catalogue, so this keeps their model lists identical by
+// construction — they can no longer drift apart the way hand-copied lists do.
+// A variant may still override either field explicitly if a vendor ever
+// diverges.
+func init() {
+	for i := range presets {
+		v := &presets[i]
+		base, ok := index[strings.TrimSuffix(v.Name, anthropicSuffix)]
+		if !ok || base == v || !strings.HasSuffix(v.Name, anthropicSuffix) {
+			continue
+		}
+		if v.DefaultModel == "" {
+			v.DefaultModel = base.DefaultModel
+		}
+		if v.Models == nil {
+			v.Models = base.Models
+		}
+	}
 }
 
 // index maps every canonical name and alias to its preset.
