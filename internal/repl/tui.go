@@ -947,13 +947,22 @@ func (m *tuiModel) popupView() string {
 	for i := m.offset; i < end; i++ {
 		c := m.cands[i]
 		desc := capitalizeFirst(c.desc)
+		// The current value is flagged with a leading accent dot (and its name
+		// painted in the accent color) rather than a "(current)" desc suffix,
+		// so the marker sits with the value it describes.
+		icon := " "
 		if c.current {
-			desc += " (current)"
+			icon = "●"
 		}
-		padded := " " + truncPad(c.text, 28)
-		line := padded + " " + styleDesc.Render(desc)
-		if i == m.sel {
+		padded := icon + " " + truncPad(c.text, 27)
+		var line string
+		switch {
+		case i == m.sel:
 			line = styleSelected.Render(padded) + " " + styleDesc.Render(desc)
+		case c.current:
+			line = styleMarker.Render(padded) + " " + styleDesc.Render(desc)
+		default:
+			line = padded + " " + styleDesc.Render(desc)
 		}
 		b.WriteString(line)
 		if i < end-1 {
