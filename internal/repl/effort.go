@@ -47,6 +47,10 @@ func (r *Repl) cmdEffort(_ context.Context, args string) error {
 	// (e.g. no credential yet) is non-fatal — the field is stored and applies
 	// on the next successful provider build regardless.
 	_ = r.rebuildProvider()
+	// Re-render so the banner's effort line reflects the switch immediately.
+	// This resets the scrollback, so it must run before the confirmation lines
+	// below (which would otherwise be wiped).
+	r.redrawTranscript()
 
 	th := theme.Current()
 	fmt.Fprintf(r.Out, "%s\n", th.Paint(th.Accent, "✓ reasoning effort set to "+string(effort)))

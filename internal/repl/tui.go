@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/theme"
 	"github.com/xautjzd/agent-cli/internal/version"
 )
@@ -184,11 +185,13 @@ func (r *Repl) printBanner(w io.Writer) {
 	label := func(k, v string) string {
 		return th.Paint(th.Muted, fmt.Sprintf("%-9s", k)) + v
 	}
+	effort, _ := provider.ParseEffort(r.Cfg.Thinking)
 	rows := []string{
 		th.Paint(th.Accent, "✻ agent-cli") + th.Paint(th.Muted, "  v"+version.Version),
 		"",
 		label("provider", r.Cfg.Provider),
 		label("model", r.Cfg.Model),
+		label("effort", string(effort)),
 		label("cwd", abbrevHome(r.WorkDir)),
 	}
 	box := lipgloss.NewStyle().
