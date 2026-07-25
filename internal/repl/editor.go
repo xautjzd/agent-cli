@@ -16,7 +16,11 @@ import (
 // The color-bearing styles (input box border, ❯ marker) are (re)built from the
 // active theme by applyThemeStyles; the attribute-only ones are theme-neutral.
 var (
-	styleSelected = lipgloss.NewStyle().Reverse(true)
+	// styleSelected paints the highlighted row's background with the accent
+	// color (rebuilt from the theme by applyThemeStyles). Foreground(accent) +
+	// Reverse swaps the pair so the bar reads accent-on-terminal-background,
+	// tracking the palette instead of a fixed white block.
+	styleSelected = selectedStyle(theme.Current())
 	styleDesc     = lipgloss.NewStyle().Faint(true)
 	styleHint     = lipgloss.NewStyle().Faint(true)
 	// styleInputBox frames the pending input, clearly separating what is
@@ -26,6 +30,13 @@ var (
 	// in scrollback.
 	styleMarker = lipgloss.NewStyle().Foreground(theme.Current().AccentColor())
 )
+
+// selectedStyle builds the highlighted-row style for a theme: the accent color
+// as the row background (via Foreground+Reverse) so the selection bar tracks
+// the palette. Monochrome (empty accent) degrades to a plain reverse block.
+func selectedStyle(th theme.Theme) lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(th.AccentColor()).Reverse(true)
+}
 
 // inputBoxStyle builds the input-frame style for a theme. The frame uses the
 // accent color so the always-visible input box is an obvious signal of the
@@ -43,6 +54,7 @@ func inputBoxStyle(th theme.Theme) lipgloss.Style {
 func applyThemeStyles() {
 	th := theme.Current()
 	styleInputBox = inputBoxStyle(th)
+	styleSelected = selectedStyle(th)
 	styleMarker = lipgloss.NewStyle().Foreground(th.AccentColor())
 	styleAsk = lipgloss.NewStyle().Bold(true).Foreground(th.AccentColor())
 }
