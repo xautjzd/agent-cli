@@ -146,6 +146,24 @@ func TestEffortArgCompletionMarksCurrent(t *testing.T) {
 	}
 }
 
+// TestCommandCompletesArgs verifies the TUI can tell which bare commands have
+// a value picker to open on submit ("/effort") from those that don't.
+func TestCommandCompletesArgs(t *testing.T) {
+	r, _, _ := newTestRepl(t, "")
+	// effort/theme/mode have static value sets, so the picker always opens.
+	// (model/provider depend on catalog data and only open when non-empty.)
+	for _, cmd := range []string{"effort", "theme", "mode"} {
+		if !r.commandCompletesArgs(cmd) {
+			t.Errorf("commandCompletesArgs(%q) = false, want true", cmd)
+		}
+	}
+	for _, cmd := range []string{"new", "exit", "help", ""} {
+		if r.commandCompletesArgs(cmd) {
+			t.Errorf("commandCompletesArgs(%q) = true, want false", cmd)
+		}
+	}
+}
+
 func TestCompletionsForFiles(t *testing.T) {
 	r, _, _ := newTestRepl(t, "")
 	os.WriteFile(filepath.Join(r.WorkDir, "main.go"), []byte("x"), 0o644)

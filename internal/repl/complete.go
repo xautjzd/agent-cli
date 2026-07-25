@@ -230,6 +230,14 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 	return markCurrent(filterCandidates(options, query), r.currentArgValue(cmd))
 }
 
+// commandCompletesArgs reports whether "/cmd <arg>" has a known set of value
+// candidates (e.g. /effort, /model), so the TUI can open the value picker when
+// the bare command is submitted instead of running it with no argument.
+func (r *Repl) commandCompletesArgs(cmd string) bool {
+	probe := "/" + cmd + " "
+	return r.argumentCandidates(probe, len(probe), len(probe)) != nil
+}
+
 // currentArgValue returns the active value a "/cmd <arg>" completion should
 // open highlighted, or "" when the command has no single current value. For
 // effort the stored value is normalized (empty → adaptive) so it matches a

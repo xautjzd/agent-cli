@@ -626,12 +626,27 @@ func (m *tuiModel) handleIdleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		if c, ok := m.selectedCand(); ok && m.wouldChange(c) {
 			m.acceptCand(c)
-			// A highlighted slash command runs immediately on Enter (Tab
-			// completes it instead, so arguments can be added). A @file
-			// completion is only filled in — the message is still being typed.
-			if strings.HasPrefix(c.text, "/") {
+			switch {
+			case strings.HasPrefix(c.text, "/"):
+				// A highlighted slash command: if it takes known argument
+				// values, open the value picker so the user can pick one
+				// (Tab still just fills). Otherwise run it immediately.
+				if m.maybeOpenArgPicker() {
+					return m, nil
+				}
 				return m.submit()
+			case m.completedSlashArg():
+				// Picked a value for a "/cmd <value>" command → run it.
+				return m.submit()
+			default:
+				// A @file completion is only filled in — the message is
+				// still being typed.
+				return m, nil
 			}
+		}
+		// A bare "/effort"-style command with a value picker opens it rather
+		// than running with no argument.
+		if m.maybeOpenArgPicker() {
 			return m, nil
 		}
 		return m.submit()
@@ -764,6 +779,38 @@ func (m *tuiModel) wouldChange(c candidate) bool {
 	v := m.input.Value()
 	start, end := tokenBounds(v, runePosToByte(v, m.input.Position()))
 	return v[start:end] != c.text
+}
+
+// maybeOpenArgPicker turns a bare "/cmd" whose argument has known values
+// (e.g. /effort) into "/cmd " and opens the value picker, so Enter walks into
+// an interactive choice instead of running the command with no argument.
+// Returns false (leaving the input untouched) for anything else.
+func (m *tuiModel) maybeOpenArgPicker() bool {
+	line := strings.TrimSpace(m.input.Value())
+	if !strings.HasPrefix(line, "/") || strings.ContainsRune(line, ' ') {
+		return false
+	}
+	if !m.repl.commandCompletesArgs(line[1:]) {
+		return false
+	}
+	m.input.SetValue(line + " ")
+	m.input.CursorEnd()
+	m.refreshCands()
+	return true
+}
+
+// completedSlashArg reports whether the input is now a "/cmd <value>" for a
+// command with a known value set, so Enter on a picked value runs it.
+func (m *tuiModel) completedSlashArg() bool {
+	line := strings.TrimSpace(m.input.Value())
+	if !strings.HasPrefix(line, "/") {
+		return false
+	}
+	cmd, rest, found := strings.Cut(line[1:], " ")
+	if !found || strings.TrimSpace(rest) == "" {
+		return false
+	}
+	return m.repl.commandCompletesArgs(cmd)
 }
 
 func (m *tuiModel) acceptCand(c candidate) {
