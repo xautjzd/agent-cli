@@ -220,13 +220,20 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 			[2]string{"bypass", "no confirmations; dangerous operations are audit-logged"},
 		)
 	case "effort":
-		for _, e := range provider.Efforts() {
+		// Only the levels the active model accepts — the same list /effort
+		// prints, so completion cannot suggest something it would reject.
+		for _, e := range provider.EffortsFor(r.Cfg.Model) {
 			options = append(options, [2]string{string(e), e.Describe()})
 		}
 	default:
 		return nil
 	}
 
+	// The effort ladder is ordered by strength, not by name; every other
+	// option set is alphabetized for stable output.
+	if cmd == "effort" {
+		return markCurrent(filterCandidatesInOrder(options, query), r.currentArgValue(cmd))
+	}
 	return markCurrent(filterCandidates(options, query), r.currentArgValue(cmd))
 }
 
@@ -296,7 +303,21 @@ func (r *Repl) modelOptions(name string) [][2]string {
 
 // filterCandidates keeps options whose name prefix- or substring-matches query,
 // prefix matches ranked first, each group sorted, capped at maxCandidates.
+// Sorting is what makes provider and file suggestions deterministic, since
+// they are collected from maps and directory walks.
 func filterCandidates(options [][2]string, query string) []candidate {
+	return filterOptions(options, query, true)
+}
+
+// filterCandidatesInOrder is filterCandidates for option sets that carry a
+// meaningful order of their own — the effort ladder runs adaptive → max → off,
+// and alphabetizing it ("adaptive, high, low, max, medium, off, xhigh") would
+// scramble a scale the user reads as a scale.
+func filterCandidatesInOrder(options [][2]string, query string) []candidate {
+	return filterOptions(options, query, false)
+}
+
+func filterOptions(options [][2]string, query string, alphabetical bool) []candidate {
 	var prefix, substr []candidate
 	for _, o := range options {
 		c := candidate{text: o[0], desc: o[1]}
@@ -307,8 +328,10 @@ func filterCandidates(options [][2]string, query string) []candidate {
 			substr = append(substr, c)
 		}
 	}
-	sort.Slice(prefix, func(i, j int) bool { return prefix[i].text < prefix[j].text })
-	sort.Slice(substr, func(i, j int) bool { return substr[i].text < substr[j].text })
+	if alphabetical {
+		sort.Slice(prefix, func(i, j int) bool { return prefix[i].text < prefix[j].text })
+		sort.Slice(substr, func(i, j int) bool { return substr[i].text < substr[j].text })
+	}
 	out := append(prefix, substr...)
 	if len(out) > maxCandidates {
 		out = out[:maxCandidates]

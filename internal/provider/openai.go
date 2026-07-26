@@ -21,11 +21,10 @@ type openAICompatible struct {
 	apiKey  string
 	baseURL string
 	client  *http.Client
-	// reasoningEffort is the reasoning_effort value ("low"/"medium"/"high") to
-	// send, or "" to omit it. It is only ever non-empty when the user opts into
-	// a graduated effort level, keeping the parameter off requests to models
-	// that do not accept it.
-	reasoningEffort string
+	// effort is the reasoning level. It is resolved per request rather than
+	// per client because what a level means on the wire depends on the model
+	// (see applyThinking).
+	effort Effort
 }
 
 // Vendor defaults. Users can always override BaseURL to point at any
@@ -72,10 +71,10 @@ func newOpenAICompatible(name, defaultBase string, cfg Config) (Provider, error)
 	}
 	effort, _ := ParseEffort(cfg.Thinking)
 	return &openAICompatible{
-		name:            name,
-		apiKey:          cfg.APIKey,
-		baseURL:         base,
-		reasoningEffort: effort.reasoningEffort(),
+		name:    name,
+		apiKey:  cfg.APIKey,
+		baseURL: base,
+		effort:  effort,
 		// Agent turns can be slow on long completions; generous timeout.
 		client: &http.Client{Timeout: 5 * time.Minute},
 	}, nil
@@ -87,13 +86,17 @@ func (p *openAICompatible) Name() string { return p.name }
 // rest of the codebase never sees vendor JSON shapes (ISP: callers only see
 // the small Provider interface).
 type chatRequest struct {
-	Model           string         `json:"model"`
-	Messages        []wireMessage  `json:"messages"`
-	Tools           []wireTool     `json:"tools,omitempty"`
-	MaxTokens       int            `json:"max_tokens,omitempty"`
-	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
-	Stream          bool           `json:"stream,omitempty"`
-	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
+	Model           string        `json:"model"`
+	Messages        []wireMessage `json:"messages"`
+	Tools           []wireTool    `json:"tools,omitempty"`
+	MaxTokens       int           `json:"max_tokens,omitempty"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	// Thinking and EnableThinking are the two shapes vendors use to turn
+	// extended thinking off; at most one is ever set (see applyThinking).
+	Thinking       *thinkingParam `json:"thinking,omitempty"`
+	EnableThinking *bool          `json:"enable_thinking,omitempty"`
+	Stream         bool           `json:"stream,omitempty"`
+	StreamOptions  *streamOptions `json:"stream_options,omitempty"`
 }
 
 // streamOptions requests a final usage chunk on streamed completions
@@ -141,16 +144,61 @@ type chatResponse struct {
 	} `json:"error"`
 }
 
+// thinkingParam is the {"type": ...} switch DeepSeek, GLM and Kimi accept.
+type thinkingParam struct {
+	Type string `json:"type"`
+}
+
+// applyThinking encodes the effort level for one request. The model decides
+// what is even expressible: whether thinking can be switched off, how that is
+// spelled, and which strength levels the endpoint accepts (SupportedThinking).
+//
+// Two rules earn their keep here. "Off" must be stated outright — omitting the
+// switch means "vendor default", and reasoning models default to thinking ON,
+// which is why turning effort off used to do nothing. And a strength the model
+// does not accept is clamped rather than sent: DeepSeek answers an unknown
+// reasoning_effort with 400, so a level left over from another model must not
+// reach the wire.
+func applyThinking(wire *chatRequest, effort Effort, model string) {
+	support := SupportedThinking(model)
+	if !support.Thinks {
+		return // nothing to control; keep the request clean
+	}
+	if effort == EffortOff {
+		switch support.disable {
+		case disableThinkingType:
+			wire.Thinking = &thinkingParam{Type: "disabled"}
+		case disableEnableThinking:
+			off := false
+			wire.EnableThinking = &off
+		case disableEffortNone:
+			wire.ReasoningEffort = "none"
+		}
+		// disableUnsupported (the model always thinks) and disableUnknown
+		// (no documented switch) send nothing: a rejected request is worse
+		// than an ignored preference.
+		return
+	}
+	if effort == EffortAdaptive {
+		return // no strength: the vendor default stands
+	}
+	level, ok := support.clamp(effort)
+	if !ok {
+		return // the model thinks, but has no strength control
+	}
+	wire.ReasoningEffort = level.reasoningEffort()
+}
+
 // Chat sends one completion request. Key flow: encode the provider-agnostic
 // Request into OpenAI wire format, POST it, then normalize the first choice
 // back into a Response the agent loop can act on.
 func (p *openAICompatible) Chat(ctx context.Context, req Request) (*Response, error) {
 	wire := chatRequest{
-		Model:           req.Model,
-		Messages:        toWireMessages(req.Messages),
-		MaxTokens:       req.MaxTokens,
-		ReasoningEffort: p.reasoningEffort,
+		Model:     req.Model,
+		Messages:  toWireMessages(req.Messages),
+		MaxTokens: req.MaxTokens,
 	}
+	applyThinking(&wire, p.effort, req.Model)
 	for _, t := range req.Tools {
 		wire.Tools = append(wire.Tools, wireTool{Type: "function", Function: t})
 	}
@@ -237,13 +285,13 @@ type streamChunk struct {
 // indistinguishable from a blocking Chat result.
 func (p *openAICompatible) ChatStream(ctx context.Context, req Request, onDelta func(Delta)) (*Response, error) {
 	wire := chatRequest{
-		Model:           req.Model,
-		Messages:        toWireMessages(req.Messages),
-		MaxTokens:       req.MaxTokens,
-		ReasoningEffort: p.reasoningEffort,
-		Stream:          true,
-		StreamOptions:   &streamOptions{IncludeUsage: true},
+		Model:         req.Model,
+		Messages:      toWireMessages(req.Messages),
+		MaxTokens:     req.MaxTokens,
+		Stream:        true,
+		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
+	applyThinking(&wire, p.effort, req.Model)
 	for _, t := range req.Tools {
 		wire.Tools = append(wire.Tools, wireTool{Type: "function", Function: t})
 	}

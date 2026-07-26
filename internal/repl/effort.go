@@ -15,14 +15,26 @@ import (
 // active one; with an argument it switches, applies the change to the running
 // provider, and persists it — mirroring how Claude Code and Codex expose a
 // quick thinking/effort toggle.
+//
+// The levels offered are the ones the *active model* accepts, which differ per
+// model and not merely per vendor (kimi-k3 always thinks and takes low/high/max;
+// kimi-k2.6 takes no strength at all but can be switched off). Offering a level
+// the model rejects would either fail the request or silently do nothing, so
+// unsupported levels are hidden and named explicitly if asked for.
 func (r *Repl) cmdEffort(_ context.Context, args string) error {
 	current, _ := provider.ParseEffort(r.Cfg.Thinking)
+	options := provider.EffortsFor(r.Cfg.Model)
 
 	arg := strings.TrimSpace(args)
 	if arg == "" {
 		th := theme.Current()
-		fmt.Fprintf(r.Out, "reasoning effort: %s\n", th.Paint(th.Accent, string(current)))
-		for _, e := range provider.Efforts() {
+		if len(options) == 0 {
+			fmt.Fprintf(r.Out, "%s has no thinking controls — the effort setting has no effect on it.\n", r.Cfg.Model)
+			return nil
+		}
+		fmt.Fprintf(r.Out, "reasoning effort: %s  (levels %s accepts)\n",
+			th.Paint(th.Accent, string(current)), r.Cfg.Model)
+		for _, e := range options {
 			// Render the active level as a full accent-colored row tagged
 			// "(current)" so the persisted choice is unmistakable, rather than
 			// leaning on a subtle arrow the "(default)" note on adaptive can
@@ -39,7 +51,20 @@ func (r *Repl) cmdEffort(_ context.Context, args string) error {
 
 	effort, ok := provider.ParseEffort(arg)
 	if !ok {
-		return fmt.Errorf("unknown effort %q (use off, low, medium, high, or adaptive)", arg)
+		return fmt.Errorf("unknown effort %q (use %s)", arg, joinEfforts(provider.Efforts()))
+	}
+	// Naming what this model does support turns "that level is not available"
+	// into an actionable message rather than a dead end.
+	if len(options) == 0 {
+		return fmt.Errorf("%s has no thinking controls, so effort cannot be set for it", r.Cfg.Model)
+	}
+	if !provider.SupportedThinking(r.Cfg.Model).Supports(effort) {
+		if effort == provider.EffortOff {
+			return fmt.Errorf("%s always thinks — it cannot be turned off; available: %s",
+				r.Cfg.Model, joinEfforts(options))
+		}
+		return fmt.Errorf("%s does not accept effort %q; available: %s",
+			r.Cfg.Model, effort, joinEfforts(options))
 	}
 
 	r.Cfg.Thinking = string(effort)
@@ -60,4 +85,13 @@ func (r *Repl) cmdEffort(_ context.Context, args string) error {
 		fmt.Fprintf(r.Out, "%s\n", th.Paint(th.Warning, "  (not saved: "+err.Error()+")"))
 	}
 	return nil
+}
+
+// joinEfforts renders a level list for a message ("off, low, high, max").
+func joinEfforts(efforts []provider.Effort) string {
+	names := make([]string, len(efforts))
+	for i, e := range efforts {
+		names[i] = string(e)
+	}
+	return strings.Join(names, ", ")
 }

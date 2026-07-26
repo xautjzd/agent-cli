@@ -509,3 +509,31 @@ func TestHistoryRecall(t *testing.T) {
 		t.Errorf("draft not restored: %q", got)
 	}
 }
+
+// The effort popup must follow the ladder (adaptive → strengths → off), not
+// the alphabet: sorting it by name reads as a scrambled scale.
+func TestEffortCompletionKeepsLadderOrder(t *testing.T) {
+	r, _, _ := newTestRepl(t, "")
+	r.Cfg.Model = "claude-fable-5"
+
+	cands := r.completionsFor("/effort ", 8)
+	got := make([]string, len(cands))
+	for i, c := range cands {
+		got[i] = c.text
+	}
+	want := []string{"adaptive", "low", "medium", "high", "xhigh", "max", "off"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("effort completion order = %v, want %v", got, want)
+	}
+
+	// A model with a different set keeps the same relative order.
+	r.Cfg.Model = "kimi-k3"
+	cands = r.completionsFor("/effort ", 8)
+	got = got[:0]
+	for _, c := range cands {
+		got = append(got, c.text)
+	}
+	if strings.Join(got, " ") != "adaptive low high max" {
+		t.Errorf("kimi-k3 effort completion = %v", got)
+	}
+}

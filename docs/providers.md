@@ -150,6 +150,31 @@ Notes:
   the `✻ Thinking…` display. Disable with `agent config set thinking off`.
   Thinking blocks carry signatures and are replayed unchanged on later turns — the
   API rejects altered ones — so reasoning survives multi-turn tool loops.
+
+### Reasoning effort is per model, not per vendor
+
+`/effort` offers the levels the **active model** accepts. The ladder is
+`off · minimal · low · medium · high · xhigh · max · adaptive`, but no vendor
+exposes all of it, and models within one vendor disagree:
+
+| Model | Can be turned off | Strength levels |
+|---|---|---|
+| `deepseek-v4-*` | yes (`thinking.type`) | low, medium, high, xhigh, max |
+| `glm-5.2`+ | yes (`thinking.type`) | minimal … max (`reasoning_effort`) |
+| `glm-4.5` … `glm-5.1` | yes | none — toggle only |
+| `kimi-k3` | **no** — always thinks | low, high, max |
+| `kimi-k2.7-code` | **no** — `disabled` is an error | none |
+| `kimi-k2.5` / `k2.6` | yes | none — toggle only |
+| `gpt-5*` | yes (`reasoning_effort: none`) | minimal … max (exact set is per model) |
+| `claude-*` | yes | mapped to thinking budgets |
+
+Levels a model does not accept are hidden from the menu and rejected with an
+explanation if named outright; a level left in the config from a previous model
+is clamped down to the nearest supported one rather than sent (DeepSeek answers
+an unknown `reasoning_effort` with HTTP 400). `adaptive` always means "send no
+strength and take the vendor default". Unknown models — a custom gateway, or one
+newer than the table in `internal/provider/thinking.go` — get low/medium/high and
+no disable switch, since guessing a field name would fail the whole request.
 - **Parallel tool calls** are preserved: every result for one assistant turn is
   sent in a single user message.
 - **Credentials** come from `ANTHROPIC_API_KEY`, the config file, or — since the

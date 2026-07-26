@@ -46,7 +46,7 @@ Run `agent config show` to print the exact paths in use.
 | Sandbox | — | — | `sandbox` | `off` |
 | Sandbox: block network | — | — | `sandbox_deny_network` | `false` |
 | Goal round cap | — | — | `goal_max_rounds` | `8` |
-| Extended thinking | — | — | `thinking` | `adaptive` (Anthropic; `off` disables) |
+| Extended thinking | — | — | `thinking` | `adaptive` (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`; per-model support — see providers.md) |
 | Prompt caching | — | — | `prompt_cache` | `on` (Anthropic; `off` disables) |
 | Auto-compaction | — | — | `auto_compact` | `on` |
 | Context window | — | — | `context_limit` | `128000` |

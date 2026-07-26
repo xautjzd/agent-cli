@@ -83,10 +83,13 @@ type Config struct {
 	SandboxDenyNetwork bool `json:"sandbox_deny_network,omitempty"`
 	// GoalMaxRounds caps /goal work-check rounds per trigger (default 8).
 	GoalMaxRounds int `json:"goal_max_rounds,omitempty"`
-	// Thinking is the reasoning-effort level for providers that support it:
-	// "off", "low", "medium", "high", or "adaptive" (empty uses the default,
-	// adaptive). Anthropic maps it to a thinking budget; OpenAI-compatible
-	// backends map it to reasoning_effort. Set via the /effort command.
+	// Thinking is the reasoning-effort level: "off", "minimal", "low",
+	// "medium", "high", "xhigh", "max", or "adaptive" (empty uses the default,
+	// adaptive). The ladder is a superset of what any one vendor exposes —
+	// which levels a model actually accepts, and whether thinking can be
+	// switched off at all, comes from provider.EffortsFor(model). Anthropic
+	// maps it to a thinking budget; OpenAI-compatible backends map it to
+	// reasoning_effort or the vendor's thinking switch. Set via /effort.
 	Thinking string `json:"thinking,omitempty"`
 	// PromptCache controls Anthropic prompt caching: "off" disables the
 	// cache_control breakpoints; empty leaves them on (the default). Set it
@@ -808,7 +811,15 @@ var validKeys = map[string]func(string) error{
 	},
 	"thinking": func(v string) error {
 		if _, ok := provider.ParseEffort(v); !ok {
-			return fmt.Errorf("must be one of off, low, medium, high, adaptive, got %q", v)
+			levels := provider.Efforts()
+			names := make([]string, len(levels))
+			for i, l := range levels {
+				names[i] = string(l)
+			}
+			// Which of these the active model actually accepts is decided per
+			// model (see provider.EffortsFor); the config file is validated
+			// against the full ladder so a value stays valid across a switch.
+			return fmt.Errorf("must be one of %s, got %q", strings.Join(names, ", "), v)
 		}
 		return nil
 	},
