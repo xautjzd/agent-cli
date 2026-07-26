@@ -201,7 +201,7 @@ func TestPickerSelectsCommand(t *testing.T) {
 	if err := r.dispatch(context.Background(), "/"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "/provider <name> [model]") {
+	if !strings.Contains(out.String(), "/provider [<name> [model]|custom|remove <name>]") {
 		t.Errorf("picker did not run help:\n%s", out.String())
 	}
 }

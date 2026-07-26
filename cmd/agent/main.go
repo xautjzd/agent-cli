@@ -16,6 +16,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -83,10 +84,15 @@ var subcommands = []subcommand{
 		{"init", "write a starter global config file"},
 		{"set <key> <value> [project]", "set one key globally, or in this project's config"},
 	}},
-	{"provider", "list | use <name> [model] [--anthropic|--openai]", [][2]string{
+	{"provider", "list | use <name> [model] | add <name> --base-url <url> | remove <name>", [][2]string{
 		{"list", "list config profiles and built-in presets, with credential status"},
 		{"use <name> [model]", "persist a provider (and model) as the default"},
 		{"  --anthropic / --openai", "pick the wire for a vendor that serves both"},
+		{"add [<name> --base-url <url>]", "define a custom provider; asks for each field when given no flags"},
+		{"  --model <id>", "the model it serves"},
+		{"  --anthropic / --openai", "which API style the endpoint speaks (default openai)"},
+		{"  --api-key <key>", "store the key; omit it to read $<NAME>_API_KEY instead"},
+		{"remove <name>", "delete a custom provider"},
 	}},
 	{"session", "list | show <id> | rename <id> <title> | delete <id>", [][2]string{
 		{"list", "list this project's recorded sessions"},
@@ -1186,6 +1192,27 @@ func runProvider(args []string) error {
 		}
 		repl.WriteProviderList(os.Stdout, cfg, terminalWidth()-2, "agent provider use <name> [model]")
 		return nil
+	case "add", "custom":
+		// With no flags the shell has nothing to go on either, so it asks —
+		// same fields, same order as the in-session flow.
+		name, def, err := providerDefinitionFrom(args[1:])
+		if err != nil {
+			return err
+		}
+		if err := config.SaveProviderProfile(config.ScopeGlobal, "", name, def); err != nil {
+			return err
+		}
+		fmt.Printf("Added %s\n\nUse it with: agent provider use %s\n", repl.DescribeProviderDefinition(name, def), name)
+		return nil
+	case "remove":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: agent provider remove <name>")
+		}
+		if err := config.RemoveProviderProfile(config.ScopeGlobal, "", args[1]); err != nil {
+			return err
+		}
+		fmt.Printf("Removed custom provider %s\n", args[1])
+		return nil
 	case "use":
 		name, model, wire, err := repl.ParseProviderArgs(strings.Join(args[1:], " "))
 		if err != nil {
@@ -1218,6 +1245,78 @@ func runProvider(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown provider command %q (try: agent provider -h)", sub)
+}
+
+// providerDefinitionFrom builds a custom provider from flags, or asks for the
+// fields when none are given. Typing a flag string is a poor first experience
+// for something with five fields, half of which have defaults.
+func providerDefinitionFrom(args []string) (string, config.ProviderConfig, error) {
+	if len(args) > 0 {
+		name, def, err := repl.ParseProviderDefinition(args)
+		if err != nil {
+			return "", def, fmt.Errorf("usage: agent provider add [<name> --base-url <url> [--model <id>] [--anthropic|--openai] [--api-key <key>]] (%w)", err)
+		}
+		return name, def, nil
+	}
+	var def config.ProviderConfig
+	in := bufio.NewScanner(os.Stdin)
+	name, ok := promptRequired(in, "Name (shown in the provider list)", "A name is required — it is how you select this provider.")
+	if !ok {
+		return "", def, fmt.Errorf("cancelled")
+	}
+	def.BaseURL, ok = promptRequired(in, "Base URL (e.g. https://llm.example.com/v1)",
+		"A base URL is required — the endpoint to send requests to, including any /v1.")
+	if !ok {
+		return "", def, fmt.Errorf("cancelled")
+	}
+	def.Format, _ = prompt(in, "API style — openai or anthropic [openai]")
+	def.Format = strings.ToLower(def.Format)
+	def.Model, _ = prompt(in, "Model")
+	def.APIKey = promptSecret(in, fmt.Sprintf("API key (Enter to read $%s from the environment instead)", config.EnvKeyName(name)))
+	return name, def, nil
+}
+
+// prompt reads one answer. ok is false at end of input, which cancels.
+func prompt(in *bufio.Scanner, label string) (string, bool) {
+	fmt.Printf("%s: ", label)
+	if !in.Scan() {
+		fmt.Println()
+		return "", false
+	}
+	return strings.TrimSpace(in.Text()), true
+}
+
+// promptRequired re-asks until the field is filled: a blank line is a slip,
+// not a decision to abandon the definition.
+func promptRequired(in *bufio.Scanner, label, requirement string) (string, bool) {
+	for {
+		value, ok := prompt(in, label)
+		if !ok {
+			return "", false
+		}
+		if value != "" {
+			return value, true
+		}
+		fmt.Println(requirement)
+	}
+}
+
+// promptSecret reads a credential without echoing it when stdin is a terminal,
+// so a key does not end up in the scrollback or a screen recording.
+func promptSecret(in *bufio.Scanner, label string) string {
+	fmt.Printf("%s: ", label)
+	if isTTY(os.Stdin) {
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(b))
+	}
+	if !in.Scan() {
+		return ""
+	}
+	return strings.TrimSpace(in.Text())
 }
 
 // --- config subcommand ------------------------------------------------------

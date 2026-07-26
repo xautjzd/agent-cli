@@ -186,8 +186,8 @@ func init() {
 		// Everyday session controls: model, reasoning, safety, planning.
 		{"help", "/help", "List commands and installed skills", (*Repl).cmdHelp},
 		{"model", "/model [name]", "Show or switch the model", (*Repl).cmdModel},
-		{"provider", "/provider <name> [model]", "Switch provider and save it (anthropic, openai, deepseek, custom)", (*Repl).cmdProvider},
-		{"effort", "/effort [off|low|medium|high|adaptive]", "Set reasoning-effort (extended thinking) level", (*Repl).cmdEffort},
+		{"provider", "/provider [<name> [model]|custom|remove <name>]", "Switch provider, or define a custom one", (*Repl).cmdProvider},
+		{"effort", "/effort [level]", "Set reasoning-effort level (the levels the model accepts)", (*Repl).cmdEffort},
 		{"mode", "/mode [hitl|bypass]", "Show or switch the permission mode for dangerous operations", (*Repl).cmdMode},
 		{"plan", "/plan [task|off]", "Plan mode: explore read-only, propose a plan, implement on approval", (*Repl).cmdPlan},
 		// Context and session lifecycle management.
@@ -965,6 +965,14 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 	if args == "" {
 		return r.listProviders()
 	}
+	// "custom" (and its alias "add") defines a provider, "remove" deletes one;
+	// anything else names a provider to switch to.
+	switch verb, rest, _ := strings.Cut(args, " "); verb {
+	case customProviderChoice, "add":
+		return r.manageProvider("add", strings.Fields(rest))
+	case "remove":
+		return r.manageProvider("remove", strings.Fields(rest))
+	}
 	name, model, wire, err := ParseProviderArgs(args)
 	if err != nil {
 		return err
@@ -1049,6 +1057,182 @@ func ParseProviderArgs(args string) (name, model, wire string, err error) {
 	return name, model, wire, nil
 }
 
+// customProviderChoice is the name under which "define a new provider" appears
+// in the /provider list, so it is reachable by completion like any provider.
+const customProviderChoice = "custom"
+
+// manageProvider adds or removes a custom provider definition and persists it
+// to the global config, where it joins the list ahead of the built-ins.
+func (r *Repl) manageProvider(verb string, args []string) error {
+	if verb == "remove" {
+		if len(args) != 1 {
+			return fmt.Errorf("usage: /provider remove <name>")
+		}
+		if err := config.RemoveProviderProfile(config.ScopeGlobal, "", args[0]); err != nil {
+			return err
+		}
+		fmt.Fprintf(r.Out, "Removed custom provider %s\n", args[0])
+		return nil
+	}
+	name, def, err := r.providerDefinition(args)
+	if err != nil {
+		return err
+	}
+	if err := config.SaveProviderProfile(config.ScopeGlobal, "", name, def); err != nil {
+		return err
+	}
+	if r.Cfg.Providers == nil {
+		r.Cfg.Providers = map[string]config.ProviderConfig{}
+	}
+	r.Cfg.Providers[name] = def
+	fmt.Fprintf(r.Out, "Added %s\n", DescribeProviderDefinition(name, def))
+	fmt.Fprintf(r.Out, "Switch to it with /provider %s\n", name)
+	return nil
+}
+
+// errCancelled reports that the user backed out of a guided prompt, as
+// opposed to filling it in wrongly.
+var errCancelled = errors.New("cancelled")
+
+// askRequired repeats a prompt until the field is filled. Submitting an empty
+// line is a slip, not a decision: it says what the field is for and asks
+// again, while Esc (or end of input) still cancels.
+func (r *Repl) askRequired(prompt, requirement string) (string, bool) {
+	for {
+		value, ok := r.readInput(prompt)
+		if !ok {
+			return "", false
+		}
+		if value = strings.TrimSpace(value); value != "" {
+			return value, true
+		}
+		fmt.Fprintln(r.Out, requirement)
+	}
+}
+
+// providerDefinition builds a custom provider from flags, or asks for the
+// fields one at a time when none are given — typing a flag string is not what
+// an interactive session is for.
+func (r *Repl) providerDefinition(args []string) (string, config.ProviderConfig, error) {
+	if len(args) > 0 {
+		return ParseProviderDefinition(args)
+	}
+	var p config.ProviderConfig
+	name, ok := r.askRequired("Name (shown in the provider list):",
+		"A name is required — it is how you select this provider.")
+	if !ok {
+		return "", p, errCancelled
+	}
+	p.BaseURL, ok = r.askRequired("Base URL (e.g. https://llm.example.com/v1):",
+		"A base URL is required — the endpoint to send requests to, including any /v1.")
+	if !ok {
+		return "", p, errCancelled
+	}
+	format, _ := r.readInput("API style — openai or anthropic [openai]:")
+	p.Format = strings.TrimSpace(strings.ToLower(format))
+	model, _ := r.readInput("Model:")
+	p.Model = strings.TrimSpace(model)
+	key, _ := r.readSecret(fmt.Sprintf("API key (Enter to read $%s from the environment instead):", config.EnvKeyName(name)))
+	p.APIKey = strings.TrimSpace(key)
+	return name, p, nil
+}
+
+// ParseProviderDefinition parses the flags that define a custom provider,
+// shared by "agent provider add" and "/provider add" so both accept the same
+// spelling:
+//
+//	<name> --base-url <url> [--model <id>] [--anthropic|--openai]
+//	       [--api-key <key>] [--env-key <VAR>] [--vision]
+//
+// The key is optional on purpose: leaving it out means the provider reads
+// <NAME>_API_KEY from the environment (config.EnvKeyName), so a definition can
+// be shared or committed without carrying a secret.
+func ParseProviderDefinition(args []string) (name string, p config.ProviderConfig, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		// A flag's value may be attached ("--model=x") or separate.
+		flag, value := a, ""
+		if eq := strings.Index(a, "="); strings.HasPrefix(a, "--") && eq > 0 {
+			flag, value = a[:eq], a[eq+1:]
+		}
+		next := func() (string, error) {
+			if value != "" {
+				return value, nil
+			}
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("%s needs a value", flag)
+			}
+			i++
+			return args[i], nil
+		}
+		switch flag {
+		case "--base-url", "--url":
+			if p.BaseURL, err = next(); err != nil {
+				return "", p, err
+			}
+		case "--model":
+			if p.Model, err = next(); err != nil {
+				return "", p, err
+			}
+		case "--api-key", "--key":
+			if p.APIKey, err = next(); err != nil {
+				return "", p, err
+			}
+		case "--env-key":
+			if p.EnvKey, err = next(); err != nil {
+				return "", p, err
+			}
+		case "--anthropic":
+			p.Format = provider.FormatAnthropic
+		case "--openai":
+			p.Format = provider.FormatOpenAI
+		case "--vision":
+			p.Vision = true
+		default:
+			if strings.HasPrefix(flag, "--") {
+				return "", p, fmt.Errorf("unknown flag %q", flag)
+			}
+			if name != "" {
+				return "", p, fmt.Errorf("unexpected argument %q", a)
+			}
+			name = a
+		}
+	}
+	if name == "" {
+		return "", p, fmt.Errorf("expected <name> --base-url <url> [--model <id>] [--anthropic|--openai] [--api-key <key>]")
+	}
+	if p.BaseURL == "" {
+		return "", p, fmt.Errorf("provider %q needs --base-url", name)
+	}
+	return name, p, nil
+}
+
+// profileCredential says where a custom provider's key comes from: the file,
+// a named variable, or the one derived from its name. A profile with no key
+// anywhere is the usual reason a custom endpoint fails, so the listing states
+// it rather than leaving the user to guess.
+func profileCredential(name string, p config.ProviderConfig) string {
+	if p.APIKey != "" {
+		return "key saved ✓"
+	}
+	envVar := p.EnvKey
+	if envVar == "" {
+		envVar = config.EnvKeyName(name)
+	}
+	if os.Getenv(envVar) != "" {
+		return envVar + " ✓"
+	}
+	return envVar + " unset"
+}
+
+// DescribeProviderDefinition summarizes a saved custom provider, including
+// where its credential will come from — the part users most often get wrong.
+func DescribeProviderDefinition(name string, p config.ProviderConfig) string {
+	return fmt.Sprintf("%s · %s · %s · %s · %s",
+		name, orDefault(p.Format, "openai"), orDefault(p.Model, "(no model — set one with /model)"),
+		p.BaseURL, profileCredential(name, p))
+}
+
 // promptProviderKey asks for a provider's API key (masked), including where to
 // get one when the catalog knows.
 func (r *Repl) promptProviderKey(name string) (string, bool) {
@@ -1107,8 +1291,8 @@ func WriteProviderList(w io.Writer, cfg *config.Config, width int, switchHint st
 		rows := make([][2]string, 0, len(names))
 		for _, name := range names {
 			p := cfg.Providers[name]
-			desc := fmt.Sprintf("%s · %s · %s", orDefault(p.Format, "openai"),
-				orDefault(p.Model, "(default)"), p.BaseURL)
+			desc := fmt.Sprintf("%s · %s · %s · %s", orDefault(p.Format, "openai"),
+				orDefault(p.Model, "(default)"), profileCredential(name, p), p.BaseURL)
 			if _, isPreset := catalog.Lookup(name); isPreset {
 				desc += " · overrides built-in"
 			}

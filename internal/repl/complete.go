@@ -217,6 +217,11 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 			}
 			options = append(options, [2]string{p.Name, desc})
 		}
+		// Defining a provider comes last: it is an action, not a provider, so
+		// it must not push the actual choices down. It is still a candidate of
+		// its own rather than a verb ("/provider add …") that nothing can
+		// complete and only the documentation knows about.
+		options = append(options, [2]string{customProviderChoice, "define a custom endpoint — asks for each field"})
 	case "model":
 		options = r.modelOptions(r.Cfg.Provider)
 	// /theme deliberately has no inline value completion: it is selected via its

@@ -609,6 +609,33 @@ func resolveProfile(cfg *Config) {
 	if cfg.APIKey == "" && p.EnvKey != "" {
 		cfg.APIKey = os.Getenv(p.EnvKey)
 	}
+	// Last resort: the variable named after the profile itself, so a custom
+	// provider can be defined once and its key kept in the shell rather than
+	// in the file.
+	if cfg.APIKey == "" {
+		cfg.APIKey = os.Getenv(EnvKeyName(cfg.Provider))
+	}
+}
+
+// EnvKeyName is the environment variable a profile reads its key from when it
+// names no other: the profile name, upper-cased, with anything that is not a
+// letter or digit turned into "_", plus "_API_KEY" — "my-gateway" becomes
+// MY_GATEWAY_API_KEY. Having one predictable name means a custom provider can
+// be declared without ever writing a secret to disk.
+func EnvKeyName(profile string) string {
+	if profile == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range strings.ToUpper(profile) {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String() + "_API_KEY"
 }
 
 // orDefault returns s, or def when s is empty.
@@ -720,6 +747,86 @@ func applyStoredKey(cfg *Config) {
 	}
 }
 
+// SaveProviderProfile writes a custom provider definition to the chosen
+// scope's config, creating or replacing the entry under name. Fields left
+// empty on p keep whatever the existing entry had, so a profile can be
+// adjusted one field at a time.
+func SaveProviderProfile(scope Scope, projectDir, name string, p ProviderConfig) error {
+	if name == "" {
+		return fmt.Errorf("a provider needs a name")
+	}
+	if p.BaseURL == "" {
+		return fmt.Errorf("provider %q needs a base_url", name)
+	}
+	switch p.Format {
+	case "", provider.FormatOpenAI, provider.FormatAnthropic:
+	default:
+		return fmt.Errorf("unknown format %q (use %s or %s)", p.Format, provider.FormatOpenAI, provider.FormatAnthropic)
+	}
+	path, err := pathFor(scope, projectDir)
+	if err != nil {
+		return err
+	}
+	cfg := &Config{}
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("parse existing config: %w", err)
+		}
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = map[string]ProviderConfig{}
+	}
+	merged := cfg.Providers[name]
+	merged.BaseURL = p.BaseURL
+	if p.Model != "" {
+		merged.Model = p.Model
+	}
+	if p.Format != "" {
+		merged.Format = p.Format
+	}
+	if p.Auth != "" {
+		merged.Auth = p.Auth
+	}
+	if p.APIKey != "" {
+		merged.APIKey = p.APIKey
+	}
+	if p.EnvKey != "" {
+		merged.EnvKey = p.EnvKey
+	}
+	if p.Vision {
+		merged.Vision = true
+	}
+	// An Anthropic-wire gateway authenticates with a bearer token unless told
+	// otherwise; getting this wrong is the classic 401 on a custom endpoint.
+	if merged.Format == provider.FormatAnthropic && merged.Auth == "" {
+		merged.Auth = provider.AuthBearer
+	}
+	cfg.Providers[name] = merged
+	return cfg.saveTo(path)
+}
+
+// RemoveProviderProfile deletes a custom provider from the chosen scope.
+func RemoveProviderProfile(scope Scope, projectDir, name string) error {
+	path, err := pathFor(scope, projectDir)
+	if err != nil {
+		return err
+	}
+	cfg := &Config{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("no config at %s", path)
+	}
+	if err := json.Unmarshal(data, cfg); err != nil {
+		return fmt.Errorf("parse existing config: %w", err)
+	}
+	if _, ok := cfg.Providers[name]; !ok {
+		return fmt.Errorf("no custom provider named %q", name)
+	}
+	delete(cfg.Providers, name)
+	delete(cfg.APIKeys, name)
+	return cfg.saveTo(path)
+}
+
 // IsNamedProfile reports whether name refers to a providers-map entry
 // rather than a built-in vendor.
 func (c *Config) IsNamedProfile(name string) bool {
@@ -766,6 +873,23 @@ func LoadForWire(providerName, format string) (*Config, error) {
 func (c *Config) BuildProvider() (provider.Provider, error) {
 	pc := provider.Config{APIKey: c.APIKey, BaseURL: c.BaseURL, Model: c.Model, Thinking: c.Thinking, PromptCache: c.PromptCache}
 	if p, ok := c.Providers[c.Provider]; ok {
+		// A malformed profile is reported before a missing credential, so a
+		// typo in "format" says so rather than sending the user after a key.
+		switch p.Format {
+		case "", provider.FormatOpenAI, provider.FormatAnthropic:
+		default:
+			return provider.NewProfile(c.Provider, p.Format, pc) // reports the format
+		}
+		// Name the variable this profile reads, so a missing key is a one-line
+		// fix instead of a bare "api key is required".
+		if pc.APIKey == "" {
+			envVar := p.EnvKey
+			if envVar == "" {
+				envVar = EnvKeyName(c.Provider)
+			}
+			return nil, fmt.Errorf("provider %s needs a credential: export %s, or set api_key on the profile (a local server accepts any value)",
+				c.Provider, envVar)
+		}
 		pc.Auth = p.Auth
 		return provider.NewProfile(c.Provider, p.Format, pc)
 	}

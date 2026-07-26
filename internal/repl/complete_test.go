@@ -560,8 +560,33 @@ func TestProviderCompletionKeepsCatalogOrder(t *testing.T) {
 		// what happened to the name.
 		"openai", "anthropic", "google", "deepseek", "zai", "kimi", "minimax",
 		"xai", "openrouter", "dashscope", "dashscope-intl", "siliconflow", "ollama",
+		// The action trails the providers rather than pushing them down.
+		"custom",
 	}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("provider completion order =\n%v\nwant\n%v", got, want)
+	}
+}
+
+// Defining a provider must be discoverable by the same reflex that finds one:
+// it appears in the /provider list rather than hiding behind a verb nobody can
+// complete.
+func TestProviderCompletionOffersCustom(t *testing.T) {
+	r, _, _ := newTestRepl(t, "")
+	cands := r.completionsFor("/provider ", 10)
+	if len(cands) == 0 {
+		t.Fatal("no provider candidates")
+	}
+	last := cands[len(cands)-1]
+	if last.text != "custom" {
+		t.Fatalf("custom should trail the provider list, got %+v", cands)
+	}
+	if !strings.Contains(last.desc, "custom endpoint") {
+		t.Errorf("the row should say what it does: %q", last.desc)
+	}
+	// It filters like anything else in the list.
+	cands = r.completionsFor("/provider cus", 13)
+	if len(cands) != 1 || cands[0].text != "custom" {
+		t.Errorf("/provider cus should offer custom, got %+v", cands)
 	}
 }

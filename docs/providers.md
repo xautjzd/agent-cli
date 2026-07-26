@@ -101,6 +101,57 @@ to `provider` + `format` when written back to the config file. `glm`, `zhipu` an
 
 ## Configuration
 
+### Custom providers
+
+Any endpoint that speaks the OpenAI or Anthropic API can be added as a provider
+of its own, from the shell or mid-session:
+
+```bash
+agent provider add my-gw --base-url https://llm.internal/v1 --model internal-v2
+agent provider add gw2 --base-url https://gw2.example/anthropic --model claude-x --anthropic
+agent provider remove my-gw
+```
+
+Both forms ask for each field when given no flags — name, base URL, API style,
+model, key — so nothing has to be memorized:
+
+```bash
+agent provider add             # guided
+```
+
+In a session, **`custom` is offered in the `/provider` list itself**, so defining
+one is found the same way as selecting one:
+
+```
+> /provider <TAB>
+  my-gw      openai · internal-v2 · …
+  openai     OpenAI · gpt-5.6-terra · …
+  …
+  custom     define a custom endpoint — asks for each field
+> /provider custom             # guided
+> /provider custom my-gw --base-url https://llm.internal/v1 --model internal-v2
+> /provider remove my-gw
+```
+
+| Flag | Meaning |
+|---|---|
+| `--base-url <url>` | required — the endpoint, including any `/v1` |
+| `--model <id>` | the model it serves |
+| `--anthropic` / `--openai` | which API style it speaks (default `openai`) |
+| `--api-key <key>` | store the key in the config |
+| `--env-key <VAR>` | read the key from a named variable instead |
+| `--vision` | its models accept image input |
+
+**Leave `--api-key` out and the key comes from `<NAME>_API_KEY`** — the provider
+name upper-cased, with punctuation turned into `_` (`my-gw` → `MY_GW_API_KEY`).
+Export it in your shell or `~/.zshrc` and the definition itself stays free of
+secrets. An `--anthropic` endpoint defaults to bearer auth, which is what
+third-party gateways expect.
+
+Custom providers are written to `providers` in the global config and listed
+**ahead of the built-ins**, with their model, endpoint and where their key comes
+from.
+
 ### Named provider profiles
 
 Address any OpenAI-compatible endpoint by name (codex/opencode style). `env_key`

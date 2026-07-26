@@ -234,3 +234,101 @@ func TestProviderAndModelSwitchesArePersisted(t *testing.T) {
 		t.Errorf("model not re-pointed at the new provider: %q", cfg.Model)
 	}
 }
+
+// A custom provider can be defined from inside the session and lands in the
+// config's providers map, where it lists ahead of the built-ins.
+func TestProviderAddDefinesACustomProvider(t *testing.T) {
+	isolateEnv(t)
+	r, _, out := newTestRepl(t, "")
+
+	err := r.dispatch(context.Background(), "/provider custom my-gw --base-url https://llm.internal/v1 --model internal-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "MY_GW_API_KEY") {
+		t.Errorf("the derived credential variable should be named:\n%s", out.String())
+	}
+	cfg, err := config.LoadIn("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := cfg.Providers["my-gw"]
+	if !ok || p.BaseURL != "https://llm.internal/v1" || p.Model != "internal-v2" {
+		t.Fatalf("custom provider not persisted: %+v ok=%v", p, ok)
+	}
+	if p.APIKey != "" {
+		t.Error("no key was given; none should have been invented")
+	}
+
+	// It is usable straight away once the key is in the environment.
+	t.Setenv("MY_GW_API_KEY", "sk-env")
+	if err := r.dispatch(context.Background(), "/provider my-gw"); err != nil {
+		t.Fatal(err)
+	}
+	if r.Cfg.Provider != "my-gw" || r.Cfg.BaseURL != "https://llm.internal/v1" {
+		t.Errorf("switch to the custom provider failed: %+v", r.Cfg)
+	}
+
+	// An anthropic-wire definition records the wire and its bearer auth.
+	if err := r.dispatch(context.Background(), "/provider custom gw2 --base-url https://gw2/anthropic --model m --anthropic --api-key sk"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = config.LoadIn(""); err != nil {
+		t.Fatal(err)
+	}
+	if g := cfg.Providers["gw2"]; g.Format != "anthropic" || g.Auth != "bearer" || g.APIKey != "sk" {
+		t.Errorf("anthropic definition wrong: %+v", g)
+	}
+
+	// Removing it is symmetric.
+	if err := r.dispatch(context.Background(), "/provider remove gw2"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = config.LoadIn(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, still := cfg.Providers["gw2"]; still {
+		t.Error("removed provider still in config")
+	}
+
+	// A definition without an endpoint is rejected rather than half-saved.
+	if err := r.dispatch(context.Background(), "/provider custom broken --model m"); err == nil {
+		t.Error("a provider without --base-url must be rejected")
+	}
+	if cfg, err = config.LoadIn(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, saved := cfg.Providers["broken"]; saved {
+		t.Error("a rejected definition must not be persisted")
+	}
+}
+
+// A blank answer to a required field is a slip, not a decision to abandon the
+// whole definition: the prompt says what is missing and asks again. Only Esc
+// (or end of input) cancels.
+func TestProviderAddRepromptsForRequiredFields(t *testing.T) {
+	isolateEnv(t)
+	// name, two empty base URLs, then a real one; blank style/model/key.
+	r, _, out := newTestRepl(t, "my-gw\n\n\nhttps://llm.internal/v1\n\n\n\n")
+
+	if err := r.dispatch(context.Background(), "/provider custom"); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if strings.Count(got, "A base URL is required") != 2 {
+		t.Errorf("each blank answer should be answered with the requirement:\n%s", got)
+	}
+	cfg, err := config.LoadIn("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Providers["my-gw"].BaseURL != "https://llm.internal/v1" {
+		t.Errorf("definition not completed after the re-prompts: %+v", cfg.Providers)
+	}
+
+	// Running out of input cancels rather than looping forever.
+	r2, _, _ := newTestRepl(t, "")
+	if err := r2.dispatch(context.Background(), "/provider custom"); err == nil {
+		t.Error("cancelling should report an error, not save a partial provider")
+	}
+}
