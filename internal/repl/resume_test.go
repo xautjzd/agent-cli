@@ -41,12 +41,19 @@ func TestProviderListingDedupsProfiles(t *testing.T) {
 	}
 	for _, line := range strings.Split(builtin, "\n") {
 		name, _, _ := strings.Cut(strings.TrimSpace(line), " ")
-		if name == "glm" || name == "deepseek" {
+		// "glm" is an alias of the zai preset, so the profile hides that
+		// preset too — a vendor must never be listed under two names.
+		if name == "glm" || name == "zai" || name == "deepseek" {
 			t.Errorf("overridden preset still shown as built-in: %q", line)
 		}
+		// A wire is not a provider: no vendor gets a second "-anthropic" row.
+		if strings.HasSuffix(name, "-anthropic") {
+			t.Errorf("anthropic wire listed as a separate provider: %q", line)
+		}
 	}
-	if !strings.Contains(builtin, "deepseek-anthropic") || !strings.Contains(builtin, "glm-anthropic") {
-		t.Errorf("anthropic-format presets missing:\n%s", builtin)
+	// A vendor's Anthropic wire is advertised on the vendor's own row.
+	if !strings.Contains(builtin, "kimi") || !strings.Contains(builtin, "--anthropic available") {
+		t.Errorf("anthropic wire not advertised on the vendor row:\n%s", builtin)
 	}
 }
 

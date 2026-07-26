@@ -60,6 +60,12 @@ type Config struct {
 	// BaseURL overrides the provider's default endpoint (required for
 	// provider "custom").
 	BaseURL string `json:"base_url,omitempty"`
+	// Format selects which wire a built-in provider is addressed over when
+	// the vendor offers more than one: "openai" (default) or "anthropic" for
+	// its Claude-Code-compatible endpoint. It is ignored for vendors that
+	// serve a single wire, and for named profiles, which carry their own
+	// Format.
+	Format string `json:"format,omitempty"`
 	// MaxTurns bounds the tool-use loop per user message.
 	MaxTurns int `json:"max_turns,omitempty"`
 	// PermissionMode is the startup permission mode: "hitl" (default) or
@@ -373,6 +379,9 @@ func mergeFile(cfg *Config, path string) error {
 	if layer.BaseURL != "" {
 		cfg.BaseURL = layer.BaseURL
 	}
+	if layer.Format != "" {
+		cfg.Format = layer.Format
+	}
 	if layer.MaxTurns > 0 {
 		cfg.MaxTurns = layer.MaxTurns
 	}
@@ -503,20 +512,25 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("AGENT_API_KEY"); v != "" {
 		cfg.APIKey = v
 	}
+	if v := os.Getenv("AGENT_FORMAT"); v != "" {
+		cfg.Format = v
+	}
 	if cfg.APIKey == "" {
-		cfg.APIKey = envKeyFor(cfg.Provider)
+		cfg.APIKey = envKeyFor(cfg.Provider, cfg.Format)
 	}
 }
 
-// envKeyFor reads the first non-empty credential environment variable a
-// provider preset declares, so a vendor's conventional variable works with
-// no configuration at all.
-func envKeyFor(providerName string) string {
+// envKeyFor reads the first non-empty credential environment variable the
+// provider's endpoint declares, so a vendor's conventional variable works
+// with no configuration at all. The format selects the endpoint: a vendor's
+// Anthropic wire looks at ANTHROPIC_AUTH_TOKEN before the vendor's own key.
+func envKeyFor(providerName, format string) string {
 	p, ok := catalog.Lookup(providerName)
 	if !ok {
 		return ""
 	}
-	for _, key := range p.EnvKeys {
+	ep, _ := p.Endpoint(format)
+	for _, key := range ep.EnvKeys {
 		if v := os.Getenv(key); v != "" {
 			return v
 		}
@@ -594,14 +608,25 @@ func applyPreset(cfg *Config) {
 	if _, shadowed := cfg.Providers[cfg.Provider]; shadowed {
 		return
 	}
-	p, ok := catalog.Lookup(cfg.Provider)
+	p, wire, ok := catalog.Resolve(cfg.Provider)
 	if !ok {
 		return
 	}
-	// Canonicalize aliases ("zhipu" → "glm") so downstream lookups agree.
+	// Canonicalize aliases ("glm" → "zai") so downstream lookups agree. A
+	// legacy "<vendor>-anthropic" name resolves to the vendor plus its
+	// Anthropic wire, which is what that name used to mean.
 	cfg.Provider = p.Name
+	if wire != "" {
+		cfg.Format = wire
+	}
+	// A format the vendor does not serve (e.g. "anthropic" left over from a
+	// previous provider) falls back to its primary wire rather than failing.
+	ep, served := p.Endpoint(cfg.Format)
+	if !served {
+		cfg.Format = ""
+	}
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = p.BaseURL
+		cfg.BaseURL = ep.BaseURL
 	}
 	// Drop a stale model left over from a different provider.
 	if staleForProvider(cfg, cfg.Model) {
@@ -611,7 +636,7 @@ func applyPreset(cfg *Config) {
 		cfg.Model = p.DefaultModel
 	}
 	if cfg.APIKey == "" {
-		cfg.APIKey = envKeyFor(p.Name)
+		cfg.APIKey = envKeyFor(p.Name, cfg.Format)
 	}
 }
 
@@ -627,19 +652,27 @@ func (c *Config) IsNamedProfile(name string) bool {
 // bound to the previous provider are dropped and re-resolved so a stale key
 // or endpoint is never sent to the new vendor.
 func LoadFor(providerName string) (*Config, error) {
+	return LoadForWire(providerName, "")
+}
+
+// LoadForWire is LoadFor with an explicit wire format for vendors that serve
+// more than one ("anthropic" selects the Claude-Code endpoint). An empty
+// format uses the vendor's primary wire.
+func LoadForWire(providerName, format string) (*Config, error) {
 	cfg, err := Load()
 	if err != nil {
 		return nil, err
 	}
-	if providerName == "" || providerName == cfg.Provider {
+	if providerName == "" || (providerName == cfg.Provider && format == cfg.Format) {
 		return cfg, nil
 	}
 	cfg.Provider = providerName
+	cfg.Format = format
 	cfg.Model = defaultModel(providerName)
 	cfg.BaseURL = os.Getenv("AGENT_BASE_URL")
 	cfg.APIKey = os.Getenv("AGENT_API_KEY")
 	if cfg.APIKey == "" {
-		cfg.APIKey = envKeyFor(providerName)
+		cfg.APIKey = envKeyFor(providerName, format)
 	}
 	resolveProfile(cfg)
 	applyPreset(cfg)
@@ -655,21 +688,28 @@ func (c *Config) BuildProvider() (provider.Provider, error) {
 		pc.Auth = p.Auth
 		return provider.NewProfile(c.Provider, p.Format, pc)
 	}
-	if p, ok := catalog.Lookup(c.Provider); ok {
+	if p, wire, ok := catalog.Resolve(c.Provider); ok {
+		// A legacy "<vendor>-anthropic" name carries its own wire, so it
+		// still selects the Anthropic endpoint without a "format" key.
+		ep, _ := p.Endpoint(orDefault(wire, c.Format))
 		// Naming the exact variable to export turns the most common
 		// setup failure into a one-line fix. The genuine Anthropic provider
 		// (AuthAPIKey) is exempt because it has its own credential paths, but
-		// third-party Anthropic-wire presets that authenticate with a bearer
+		// third-party Anthropic-wire endpoints that authenticate with a bearer
 		// token still require one.
-		if c.APIKey == "" && (p.Format != provider.FormatAnthropic || p.Auth == provider.AuthBearer) {
+		if c.APIKey == "" && (ep.Format != provider.FormatAnthropic || ep.Auth == provider.AuthBearer) {
 			return nil, fmt.Errorf("provider %s needs a credential: export %s (get one at %s)",
-				p.Name, strings.Join(p.EnvKeys, " or "), orDefault(p.Notes, "the vendor console"))
+				p.Name, strings.Join(ep.EnvKeys, " or "), orDefault(p.Notes, "the vendor console"))
 		}
-		// A preset that is not a registered built-in is built like a
-		// profile, using the preset's wire format and auth style.
-		if !provider.IsRegistered(c.Provider) {
-			pc.Auth = p.Auth
-			return provider.NewProfile(p.Name, p.Format, pc)
+		// A preset addressed over a non-primary wire, or one that is not a
+		// registered built-in, is built like a profile from its endpoint's
+		// wire format and auth style.
+		if ep.Format != p.Format || !provider.IsRegistered(p.Name) {
+			pc.Auth = ep.Auth
+			if pc.BaseURL == "" {
+				pc.BaseURL = ep.BaseURL
+			}
+			return provider.NewProfile(p.Name, ep.Format, pc)
 		}
 	}
 	return provider.New(c.Provider, pc)
@@ -691,10 +731,16 @@ func (c *Config) ModelSupportsVision() bool {
 // validKeys documents the keys accepted by SetScoped, with validators where
 // needed.
 var validKeys = map[string]func(string) error{
-	"provider":        nil,
-	"model":           nil,
-	"api_key":         nil,
-	"base_url":        nil,
+	"provider": nil,
+	"model":    nil,
+	"api_key":  nil,
+	"base_url": nil,
+	"format": func(v string) error {
+		if v != "" && v != provider.FormatOpenAI && v != provider.FormatAnthropic {
+			return fmt.Errorf("must be %s or %s, got %q", provider.FormatOpenAI, provider.FormatAnthropic, v)
+		}
+		return nil
+	},
 	"max_turns":       validatePositiveInt,
 	"goal_max_rounds": validatePositiveInt,
 	"vision_provider": nil,
@@ -782,6 +828,8 @@ func SetScoped(scope Scope, projectDir, key, value string) error {
 		cfg.APIKey = value
 	case "base_url":
 		cfg.BaseURL = value
+	case "format":
+		cfg.Format = value
 	case "max_turns":
 		fmt.Sscanf(value, "%d", &cfg.MaxTurns)
 	case "goal_max_rounds":
@@ -828,8 +876,9 @@ func (c *Config) Save() error {
 // SaveProviderKey persists an API key for a provider as a named profile in the
 // chosen scope, filling the connection details (base URL, wire format, auth)
 // from the built-in catalog so a bare key is enough to reconnect next time.
-// Existing profile fields are preserved.
-func SaveProviderKey(scope Scope, projectDir, name, key string) error {
+// The format selects which of a vendor's endpoints the profile is pinned to
+// (empty = its primary wire). Existing profile fields are preserved.
+func SaveProviderKey(scope Scope, projectDir, name, format, key string) error {
 	path, err := pathFor(scope, projectDir)
 	if err != nil {
 		return err
@@ -845,15 +894,16 @@ func SaveProviderKey(scope Scope, projectDir, name, key string) error {
 	}
 	prof := cfg.Providers[name]
 	prof.APIKey = key
-	if p, ok := catalog.Lookup(name); ok {
+	if p, wire, ok := catalog.Resolve(name); ok {
+		ep, _ := p.Endpoint(orDefault(wire, format))
 		if prof.BaseURL == "" {
-			prof.BaseURL = p.BaseURL
+			prof.BaseURL = ep.BaseURL
 		}
 		if prof.Format == "" {
-			prof.Format = p.Format
+			prof.Format = ep.Format
 		}
 		if prof.Auth == "" {
-			prof.Auth = p.Auth
+			prof.Auth = ep.Auth
 		}
 		if prof.Model == "" {
 			prof.Model = p.DefaultModel

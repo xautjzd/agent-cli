@@ -408,13 +408,13 @@ func TestEditorInputBoxAndCollapse(t *testing.T) {
 func TestProviderAndModelArgumentCompletion(t *testing.T) {
 	r, _, _ := newTestRepl(t, "")
 
-	// "/provider gl" suggests catalog providers.
-	cands := r.completionsFor("/provider gl", 12)
+	// "/provider za" suggests catalog providers.
+	cands := r.completionsFor("/provider za", 12)
 	if len(cands) == 0 {
 		t.Fatal("no provider suggestions")
 	}
-	if cands[0].text != "glm" {
-		t.Errorf("first suggestion = %q, want glm", cands[0].text)
+	if cands[0].text != "zai" {
+		t.Errorf("first suggestion = %q, want zai", cands[0].text)
 	}
 	if cands[0].desc == "" {
 		t.Error("suggestion should carry a description")

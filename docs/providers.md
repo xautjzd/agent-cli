@@ -24,7 +24,8 @@ agent -provider anthropic -model claude-sonnet-5    # at launch
 ```
 
 `/provider` with no argument lists your config profiles and the built-ins
-**separately** — a profile named like a preset (e.g. `glm`) shadows it and shows
+**separately** — a profile named like a preset (e.g. `zai`, or one of its aliases)
+shadows it and shows
 once, tagged "overrides built-in", so there are no duplicates. Each built-in shows
 its default model and whether its credential is exported.
 
@@ -39,19 +40,16 @@ default model, and credential variable are all known:
 
 ```bash
 export ZHIPUAI_API_KEY=...
-agent config set provider glm      # model, base_url and auth resolved automatically
+agent config set provider zai      # model, base_url and auth resolved automatically
 ```
 
 | Preset | Vendor | Wire format | Credential |
 |---|---|---|---|
 | `anthropic` | Anthropic | Anthropic | `ANTHROPIC_API_KEY` |
 | `openai` | OpenAI | OpenAI | `OPENAI_API_KEY` |
-| `deepseek` | DeepSeek | OpenAI | `DEEPSEEK_API_KEY` |
-| `deepseek-anthropic` | DeepSeek (Claude-Code endpoint) | Anthropic | `ANTHROPIC_AUTH_TOKEN` |
-| `glm` (`zhipu`) | Zhipu GLM | OpenAI | `ZHIPUAI_API_KEY` |
-| `glm-anthropic` | Zhipu GLM (Claude-Code endpoint) | Anthropic | `ANTHROPIC_AUTH_TOKEN` |
-| `kimi` (`moonshot`) | Moonshot Kimi | OpenAI | `MOONSHOT_API_KEY` |
-| `kimi-anthropic` | Moonshot Kimi (Claude-Code endpoint) | Anthropic | `ANTHROPIC_AUTH_TOKEN` |
+| `deepseek` | DeepSeek | OpenAI + Anthropic | `DEEPSEEK_API_KEY` |
+| `zai` (`glm`, `zhipu`, `bigmodel`) | Z.AI (GLM models) | OpenAI + Anthropic | `ZHIPUAI_API_KEY` |
+| `kimi` (`moonshot`) | Moonshot Kimi | OpenAI + Anthropic | `MOONSHOT_API_KEY` |
 | `dashscope` (`qwen`) | Alibaba DashScope | OpenAI | `DASHSCOPE_API_KEY` |
 | `dashscope-intl` | DashScope (Singapore) | OpenAI | `DASHSCOPE_API_KEY` |
 | `openrouter` | OpenRouter | OpenAI | `OPENROUTER_API_KEY` |
@@ -68,6 +66,28 @@ Presets are defaults, never constraints:
   preset — including a model newer than the catalog knows about.
 - A named profile with the same name shadows the preset entirely.
 - Endpoints and model lists change over time; override anything a vendor moves.
+
+### Two wires, one vendor
+
+DeepSeek, Z.AI and Moonshot each publish two endpoints for the same models: their
+OpenAI-compatible API and a Claude-Code-compatible ("Anthropic") one. That is a
+wire choice, not a second vendor, so each is **one preset** addressed over either
+wire — the OpenAI one by default:
+
+```bash
+> /provider deepseek --anthropic   # switch to the Claude-Code endpoint
+> /provider deepseek               # back to the OpenAI endpoint
+agent -provider zai -format anthropic
+agent config set format anthropic  # persist the wire
+```
+
+On the Anthropic wire the credential is presented as a bearer token and
+`ANTHROPIC_AUTH_TOKEN` is tried before the vendor's own key.
+
+The old `deepseek-anthropic` / `glm-anthropic` / `kimi-anthropic` names still
+resolve — they now mean "this vendor, on its Anthropic wire" and are normalized
+to `provider` + `format` when written back to the config file. `glm`, `zhipu` and
+`bigmodel` remain aliases of `zai` (GLM is the model family; Z.AI is the vendor).
 
 ## Configuration
 
@@ -136,8 +156,11 @@ agent -provider anthropic -model claude-sonnet-5
 
 ### Anthropic-compatible third-party gateways
 
-Several vendors expose an Anthropic-compatible endpoint. Declare one as a named
-profile with `"format": "anthropic"`; both wire formats can coexist:
+Several vendors expose an Anthropic-compatible endpoint. For preset vendors
+(DeepSeek, Z.AI, Kimi) it is built in — use `/provider <name> --anthropic` (see
+[Two wires, one vendor](#two-wires-one-vendor)) and skip the profile. For any
+other gateway, declare a named profile with `"format": "anthropic"`; both wire
+formats can coexist:
 
 ```json
 {

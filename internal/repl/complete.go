@@ -195,16 +195,18 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 	case "provider":
 		// User profiles first; a profile shadows a preset of the same name,
 		// so the preset is skipped to avoid a duplicate suggestion.
-		seen := map[string]bool{}
 		for name, p := range r.Cfg.Providers {
 			options = append(options, [2]string{name, "your config · " + p.BaseURL})
-			seen[name] = true
 		}
 		for _, p := range catalog.All() {
-			if seen[p.Name] {
+			if shadowed(r.Cfg.Providers, p) {
 				continue
 			}
-			options = append(options, [2]string{p.Name, p.Label + " · " + p.DefaultModel})
+			desc := p.Label + " · " + p.DefaultModel
+			if p.AnthropicBaseURL != "" {
+				desc += " · --anthropic available"
+			}
+			options = append(options, [2]string{p.Name, desc})
 		}
 	case "model":
 		options = r.modelOptions(r.Cfg.Provider)

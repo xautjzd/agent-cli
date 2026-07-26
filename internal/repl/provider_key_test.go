@@ -76,8 +76,9 @@ func TestProviderSwitchReconcilesBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Provider != "deepseek-anthropic" {
-		t.Fatalf("provider not persisted: %q", cfg.Provider)
+	// The legacy name normalizes to the vendor plus its anthropic wire.
+	if cfg.Provider != "deepseek" || cfg.Format != "anthropic" {
+		t.Fatalf("provider not persisted: %q format=%q", cfg.Provider, cfg.Format)
 	}
 	if cfg.BaseURL != "https://api.deepseek.com/anthropic" {
 		t.Errorf("base_url did not follow the new provider: got %q", cfg.BaseURL)
@@ -98,16 +99,50 @@ func TestProviderBearerAnthropicPromptsForKey(t *testing.T) {
 	if !strings.Contains(out.String(), "Enter API key for deepseek-anthropic") {
 		t.Errorf("expected an API-key prompt, got:\n%s", out.String())
 	}
-	if r.Cfg.Provider != "deepseek-anthropic" || r.Cfg.APIKey != "sk-ds-key" {
-		t.Errorf("config not updated: provider=%s key=%q", r.Cfg.Provider, r.Cfg.APIKey)
+	if r.Cfg.Provider != "deepseek" || r.Cfg.Format != "anthropic" || r.Cfg.APIKey != "sk-ds-key" {
+		t.Errorf("config not updated: provider=%s format=%s key=%q", r.Cfg.Provider, r.Cfg.Format, r.Cfg.APIKey)
 	}
-	// The persisted profile must carry the key so the next load reconnects.
+	// The persisted profile must carry the key so the next load reconnects —
+	// and pin the wire the switch was made on.
 	cfg, err := config.LoadIn("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p, ok := cfg.Providers["deepseek-anthropic"]; !ok || p.APIKey != "sk-ds-key" {
+	p, ok := cfg.Providers["deepseek"]
+	if !ok || p.APIKey != "sk-ds-key" {
 		t.Errorf("key not persisted as a profile: %+v ok=%v", p, ok)
+	}
+	if p.Format != "anthropic" || p.BaseURL != "https://api.deepseek.com/anthropic" {
+		t.Errorf("saved profile lost the anthropic wire: %+v", p)
+	}
+}
+
+// Switching wires with the flag must be equivalent to the legacy
+// "<vendor>-anthropic" name, and switching back must clear the wire rather
+// than leaving the previous endpoint pinned.
+func TestProviderWireFlagSwitchesEndpoint(t *testing.T) {
+	isolateEnv(t)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-ds")
+	r, _, _ := newTestRepl(t, "")
+
+	if err := r.dispatch(context.Background(), "/provider deepseek --anthropic"); err != nil {
+		t.Fatal(err)
+	}
+	if r.Cfg.Format != "anthropic" || r.Cfg.BaseURL != "https://api.deepseek.com/anthropic" {
+		t.Fatalf("--anthropic did not select the anthropic endpoint: format=%q base=%q", r.Cfg.Format, r.Cfg.BaseURL)
+	}
+	if err := r.dispatch(context.Background(), "/provider deepseek"); err != nil {
+		t.Fatal(err)
+	}
+	if r.Cfg.Format != "" || r.Cfg.BaseURL != "https://api.deepseek.com" {
+		t.Errorf("switching back kept the anthropic wire: format=%q base=%q", r.Cfg.Format, r.Cfg.BaseURL)
+	}
+	cfg, err := config.LoadIn("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Format != "" {
+		t.Errorf("stale format persisted: %q", cfg.Format)
 	}
 }
 

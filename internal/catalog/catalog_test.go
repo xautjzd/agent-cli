@@ -65,31 +65,76 @@ func TestAnthropicFormatPresetsHaveEndpoints(t *testing.T) {
 	}
 }
 
-func TestAnthropicVariantsShareTheirBaseModelList(t *testing.T) {
+// A vendor's second wire is an endpoint of the same provider, so it must
+// serve the vendor's own models over a bearer-authenticated gateway.
+func TestAnthropicWireIsAnEndpointOfTheSameVendor(t *testing.T) {
 	for _, p := range All() {
-		base, ok := Lookup(strings.TrimSuffix(p.Name, "-anthropic"))
-		if !ok || !strings.HasSuffix(p.Name, "-anthropic") || base.Name == p.Name {
+		if p.AnthropicBaseURL == "" {
+			if _, ok := p.Endpoint(provider.FormatAnthropic); ok && p.Format != provider.FormatAnthropic {
+				t.Errorf("%s: reports an anthropic wire it does not serve", p.Name)
+			}
 			continue
 		}
-		if p.DefaultModel != base.DefaultModel {
-			t.Errorf("%s default model %q != base %s %q", p.Name, p.DefaultModel, base.Name, base.DefaultModel)
+		ep, ok := p.Endpoint(provider.FormatAnthropic)
+		if !ok {
+			t.Fatalf("%s: anthropic wire not served", p.Name)
 		}
-		if strings.Join(p.Models, ",") != strings.Join(base.Models, ",") {
-			t.Errorf("%s models %v != base %s models %v", p.Name, p.Models, base.Name, base.Models)
+		if ep.BaseURL != p.AnthropicBaseURL || ep.Format != provider.FormatAnthropic {
+			t.Errorf("%s: wrong anthropic endpoint %+v", p.Name, ep)
+		}
+		if ep.Auth != provider.AuthBearer {
+			t.Errorf("%s: gateway should use bearer auth, got %q", p.Name, ep.Auth)
+		}
+		if len(ep.EnvKeys) == 0 || ep.EnvKeys[0] != anthropicTokenEnv {
+			t.Errorf("%s: anthropic wire should try %s first, got %v", p.Name, anthropicTokenEnv, ep.EnvKeys)
+		}
+		// The primary wire is unchanged by asking for the other one.
+		if def, _ := p.Endpoint(""); def.BaseURL != p.BaseURL || def.Format != p.Format {
+			t.Errorf("%s: primary endpoint changed: %+v", p.Name, def)
+		}
+	}
+}
+
+// The vendor and its Anthropic endpoint used to be two presets
+// ("deepseek" / "deepseek-anthropic"). The old names still resolve — to the
+// one vendor, on the wire that name meant.
+func TestLegacyAnthropicNamesResolveToTheVendorWire(t *testing.T) {
+	for _, legacy := range []string{"deepseek-anthropic", "zai-anthropic", "glm-anthropic", "kimi-anthropic"} {
+		p, wire, ok := Resolve(legacy)
+		if !ok {
+			t.Errorf("Resolve(%q) failed; legacy names must keep working", legacy)
+			continue
+		}
+		if wire != provider.FormatAnthropic {
+			t.Errorf("Resolve(%q) wire = %q, want anthropic", legacy, wire)
+		}
+		if p.AnthropicBaseURL == "" {
+			t.Errorf("Resolve(%q) → %s, which has no anthropic endpoint", legacy, p.Name)
+		}
+	}
+	// A suffix on a vendor without that endpoint is not a provider.
+	if _, _, ok := Resolve("openai-anthropic"); ok {
+		t.Error("openai has no anthropic endpoint; the legacy name should not resolve")
+	}
+	// The vendors are one entry each now, not two.
+	for _, name := range Names() {
+		if strings.HasSuffix(name, "-anthropic") && name != "anthropic" {
+			t.Errorf("%q is still a separate preset; wires belong to one vendor entry", name)
 		}
 	}
 }
 
 func TestLookupByNameAndAlias(t *testing.T) {
-	p, ok := Lookup("glm")
-	if !ok || p.Name != "glm" {
-		t.Fatalf("Lookup(glm) = %+v, %v", p, ok)
+	p, ok := Lookup("zai")
+	if !ok || p.Name != "zai" {
+		t.Fatalf("Lookup(zai) = %+v, %v", p, ok)
 	}
-	// Aliases resolve to the same canonical preset.
-	for _, alias := range []string{"zhipu", "bigmodel", "ZHIPU", "  glm  "} {
+	// Aliases — including the pre-rename spellings — resolve to the same
+	// canonical preset.
+	for _, alias := range []string{"glm", "zhipu", "bigmodel", "z.ai", "ZHIPU", "  glm  "} {
 		got, ok := Lookup(alias)
-		if !ok || got.Name != "glm" {
-			t.Errorf("Lookup(%q) = %+v, %v; want the glm preset", alias, got, ok)
+		if !ok || got.Name != "zai" {
+			t.Errorf("Lookup(%q) = %+v, %v; want the zai preset", alias, got, ok)
 		}
 	}
 	if _, ok := Lookup("no-such-provider"); ok {
@@ -118,7 +163,7 @@ func TestNamesAndModels(t *testing.T) {
 
 func TestCatalogCoversRequestedVendors(t *testing.T) {
 	// The vendors this CLI is expected to configure out of the box.
-	for _, want := range []string{"openai", "anthropic", "deepseek", "glm", "kimi", "dashscope"} {
+	for _, want := range []string{"openai", "anthropic", "deepseek", "zai", "glm", "kimi", "dashscope"} {
 		if _, ok := Lookup(want); !ok {
 			t.Errorf("catalog is missing %q", want)
 		}

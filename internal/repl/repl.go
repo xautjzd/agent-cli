@@ -958,10 +958,12 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 	if args == "" {
 		return r.listProviders()
 	}
-	name, model, _ := strings.Cut(args, " ")
-	model = strings.TrimSpace(model)
+	name, model, wire, err := parseProviderArgs(args)
+	if err != nil {
+		return err
+	}
 
-	cfg, err := config.LoadFor(name)
+	cfg, err := config.LoadForWire(name, wire)
 	if err != nil {
 		return err
 	}
@@ -987,7 +989,7 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 		if p, err = cfg.BuildProvider(); err != nil {
 			return err
 		}
-		r.offerSaveProviderKey(name, key)
+		r.offerSaveProviderKey(cfg.Provider, cfg.Format, key)
 	}
 	r.Agent.SetProvider(p, cfg.Model)
 	r.Cfg = cfg
@@ -996,10 +998,18 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 	// named one explicitly; otherwise the profile/preset supplies its own model
 	// on the next load, so pinning a top-level model would just go stale.
 	saved := "session only"
-	if err := config.SetScoped(config.ScopeGlobal, "", "provider", name); err != nil {
+	// The canonical name is stored, so an alias ("glm") or the legacy
+	// "<vendor>-anthropic" spelling is normalized on the way into the file.
+	if err := config.SetScoped(config.ScopeGlobal, "", "provider", cfg.Provider); err != nil {
 		fmt.Fprintln(r.Out, "warning: could not persist provider:", err)
 	} else {
 		saved = "saved"
+		// The wire is part of the switch: it must be cleared when moving to a
+		// provider that serves only its primary one, or the stale value would
+		// follow the new provider on reload.
+		if err := config.SetScoped(config.ScopeGlobal, "", "format", cfg.Format); err != nil {
+			fmt.Fprintln(r.Out, "warning: could not persist format:", err)
+		}
 		// Reconcile the top-level base_url with the new provider. A stale value
 		// from the previous provider would shadow a profile/preset endpoint on
 		// reload (applyPreset only fills base_url when it is empty), so clear it
@@ -1022,9 +1032,39 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 	// This resets the scrollback, so it must run before the confirmation line
 	// below (which would otherwise be wiped).
 	r.redrawTranscript()
-	fmt.Fprintf(r.Out, "Switched to provider=%s model=%s (history preserved, %s)\n", name, cfg.Model, saved)
+	target := cfg.Provider
+	if cfg.Format != "" {
+		target += " (" + cfg.Format + " wire)"
+	}
+	fmt.Fprintf(r.Out, "Switched to provider=%s model=%s (history preserved, %s)\n", target, cfg.Model, saved)
 	r.stripImagesIfNeeded()
 	return nil
+}
+
+// parseProviderArgs splits "/provider <name> [model] [--anthropic|--openai]"
+// into its parts. The wire flags pick which endpoint a vendor that serves
+// both is addressed over; an empty wire means its primary one.
+func parseProviderArgs(args string) (name, model, wire string, err error) {
+	for _, f := range strings.Fields(args) {
+		switch {
+		case f == "--anthropic":
+			wire = provider.FormatAnthropic
+		case f == "--openai":
+			wire = provider.FormatOpenAI
+		case strings.HasPrefix(f, "--"):
+			return "", "", "", fmt.Errorf("unknown flag %q (use --anthropic or --openai)", f)
+		case name == "":
+			name = f
+		case model == "":
+			model = f
+		default:
+			return "", "", "", fmt.Errorf("too many arguments: /provider <name> [model] [--anthropic|--openai]")
+		}
+	}
+	if name == "" {
+		return "", "", "", fmt.Errorf("usage: /provider <name> [model] [--anthropic|--openai]")
+	}
+	return name, model, wire, nil
 }
 
 // providerOwnsBaseURL reports whether the named provider supplies its own
@@ -1057,12 +1097,12 @@ func (r *Repl) promptProviderKey(name string) (string, bool) {
 
 // offerSaveProviderKey asks whether to persist the just-entered key so the
 // provider reconnects without prompting next time.
-func (r *Repl) offerSaveProviderKey(name, key string) {
+func (r *Repl) offerSaveProviderKey(name, format, key string) {
 	ans, ok := r.readInput(fmt.Sprintf("Save this key for %s to config? [Y/n]:", name))
 	if ok && strings.EqualFold(strings.TrimSpace(ans), "n") {
 		return
 	}
-	if err := config.SaveProviderKey(config.ScopeGlobal, "", name, key); err != nil {
+	if err := config.SaveProviderKey(config.ScopeGlobal, "", name, format, key); err != nil {
 		fmt.Fprintln(r.Out, "warning: could not save key:", err)
 		return
 	}
@@ -1103,9 +1143,9 @@ func (r *Repl) listProviders() error {
 	fmt.Fprintln(r.Out, "Built-in providers — /provider <name> [model]:")
 	rows := make([][2]string, 0, len(catalog.All()))
 	for _, p := range catalog.All() {
-		// A profile of the same name shadows this preset entirely; don't
-		// list it twice.
-		if _, overridden := r.Cfg.Providers[p.Name]; overridden {
+		// A profile naming this preset — by its canonical name or an alias —
+		// shadows it entirely; don't list it twice.
+		if shadowed(r.Cfg.Providers, p) {
 			continue
 		}
 		// Name the credential variable actually supplying the key (or the
@@ -1118,6 +1158,9 @@ func (r *Repl) listProviders() error {
 			}
 		}
 		desc := fmt.Sprintf("%s · %s · %s", p.Label, p.DefaultModel, cred)
+		if p.AnthropicBaseURL != "" {
+			desc += " · --anthropic available"
+		}
 		if p.Notes != "" {
 			desc += " · " + p.Notes
 		}
@@ -1125,6 +1168,20 @@ func (r *Repl) listProviders() error {
 	}
 	textwidth.WriteList(r.Out, rows, avail, 1)
 	return nil
+}
+
+// shadowed reports whether a user profile takes over a preset — either under
+// its canonical name or one of its aliases, both of which resolve to it.
+func shadowed(profiles map[string]config.ProviderConfig, p catalog.Provider) bool {
+	if _, ok := profiles[p.Name]; ok {
+		return true
+	}
+	for _, a := range p.Aliases {
+		if _, ok := profiles[a]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Repl) cmdSkills(_ context.Context, _ string) error {

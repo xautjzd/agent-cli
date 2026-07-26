@@ -80,6 +80,7 @@ func run(args []string) error {
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
 	prompt := fs.String("p", "", "run a single prompt non-interactively and exit (\"-\" reads the prompt from stdin)")
 	providerFlag := fs.String("provider", "", "override provider (anthropic, openai, deepseek, custom)")
+	formatFlag := fs.String("format", "", "wire format for vendors serving both: openai (default) or anthropic")
 	modelFlag := fs.String("model", "", "override model")
 	bypass := fs.Bool("bypass", false, "permission bypass mode: no confirmations, dangerous operations are audit-logged")
 	output := fs.String("output", "text", "non-interactive output format: text or json")
@@ -96,7 +97,7 @@ func run(args []string) error {
 		// LoadFor re-targets the whole configuration at the requested
 		// vendor — default model, endpoint and credentials — instead of
 		// leaving settings bound to the previous provider behind.
-		if cfg, err = config.LoadFor(*providerFlag); err != nil {
+		if cfg, err = config.LoadForWire(*providerFlag, *formatFlag); err != nil {
 			return err
 		}
 	}

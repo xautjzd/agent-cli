@@ -33,6 +33,12 @@ type Provider struct {
 	// Format is the wire protocol: provider.FormatOpenAI or
 	// provider.FormatAnthropic.
 	Format string
+	// AnthropicBaseURL is the vendor's optional second endpoint, which serves
+	// the same models over the Anthropic wire (the "Claude Code endpoint").
+	// It is an alternative wire for the same vendor, not a separate provider:
+	// configuration selects it with "format": "anthropic". Empty means the
+	// vendor speaks only Format.
+	AnthropicBaseURL string
 	// Auth selects the credential header; only meaningful for the
 	// Anthropic format, where third-party gateways expect a bearer token.
 	Auth string
@@ -97,12 +103,13 @@ var presets = []Provider{
 		Notes:         "platform.openai.com",
 	},
 	{
-		Name:         "deepseek",
-		Label:        "DeepSeek",
-		BaseURL:      "https://api.deepseek.com",
-		Format:       provider.FormatOpenAI,
-		EnvKeys:      []string{"DEEPSEEK_API_KEY"},
-		DefaultModel: "deepseek-v4-flash",
+		Name:             "deepseek",
+		Label:            "DeepSeek",
+		BaseURL:          "https://api.deepseek.com",
+		AnthropicBaseURL: "https://api.deepseek.com/anthropic",
+		Format:           provider.FormatOpenAI,
+		EnvKeys:          []string{"DEEPSEEK_API_KEY"},
+		DefaultModel:     "deepseek-v4-flash",
 		// deepseek-chat / deepseek-reasoner were deprecated 2026-07-24 (they
 		// map to the non-thinking / thinking modes of deepseek-v4-flash).
 		Models:        []string{"deepseek-v4-pro", "deepseek-v4-flash"},
@@ -110,23 +117,16 @@ var presets = []Provider{
 		Notes:         "platform.deepseek.com",
 	},
 	{
-		Name:         "deepseek-anthropic",
-		Label:        "DeepSeek (Anthropic-compatible)",
-		BaseURL:      "https://api.deepseek.com/anthropic",
-		Format:       provider.FormatAnthropic,
-		Auth:         provider.AuthBearer,
-		EnvKeys:      []string{"ANTHROPIC_AUTH_TOKEN", "DEEPSEEK_API_KEY"},
-		// DefaultModel and Models are inherited from "deepseek" (see init).
-		Notes: "Claude-Code-compatible endpoint",
-	},
-	{
-		Name:         "glm",
-		Aliases:      []string{"zhipu", "bigmodel"},
-		Label:        "Zhipu GLM",
-		BaseURL:      "https://open.bigmodel.cn/api/paas/v4",
-		Format:       provider.FormatOpenAI,
-		EnvKeys:      []string{"ZHIPU_API_KEY", "ZHIPUAI_API_KEY", "GLM_API_KEY"},
-		DefaultModel: "glm-4.6",
+		Name: "zai",
+		// GLM is the model family, Z.AI (Zhipu) the vendor; the old spellings
+		// stay valid so existing configuration keeps working.
+		Aliases:          []string{"glm", "zhipu", "bigmodel", "z.ai"},
+		Label:            "Z.AI",
+		BaseURL:          "https://open.bigmodel.cn/api/paas/v4",
+		AnthropicBaseURL: "https://open.bigmodel.cn/api/anthropic",
+		Format:           provider.FormatOpenAI,
+		EnvKeys:          []string{"ZHIPU_API_KEY", "ZHIPUAI_API_KEY", "GLM_API_KEY"},
+		DefaultModel:     "glm-4.6",
 		// Per docs.bigmodel.cn model-overview. Most GLM models are 200K;
 		// glm-5.2 (1M) and glm-4.5-air (128K) diverge (see modelContextWindows).
 		Models:        []string{"glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.6", "glm-4.5-air"},
@@ -134,39 +134,20 @@ var presets = []Provider{
 		Notes:         "open.bigmodel.cn",
 	},
 	{
-		Name:         "glm-anthropic",
-		Label:        "Zhipu GLM (Anthropic-compatible)",
-		BaseURL:      "https://open.bigmodel.cn/api/anthropic",
-		Format:       provider.FormatAnthropic,
-		Auth:         provider.AuthBearer,
-		EnvKeys:      []string{"ANTHROPIC_AUTH_TOKEN", "ZHIPU_API_KEY", "ZHIPUAI_API_KEY", "GLM_API_KEY"},
-		// DefaultModel and Models are inherited from "glm" (see init).
-		Notes: "Claude-Code-compatible endpoint",
-	},
-	{
-		Name:         "kimi",
-		Aliases:      []string{"moonshot"},
-		Label:        "Moonshot Kimi",
-		BaseURL:      "https://api.moonshot.cn/v1",
-		Format:       provider.FormatOpenAI,
-		EnvKeys:       []string{"MOONSHOT_API_KEY", "KIMI_API_KEY"},
-		DefaultModel: "kimi-k3",
+		Name:             "kimi",
+		Aliases:          []string{"moonshot"},
+		Label:            "Moonshot Kimi",
+		BaseURL:          "https://api.moonshot.cn/v1",
+		AnthropicBaseURL: "https://api.moonshot.cn/anthropic",
+		Format:           provider.FormatOpenAI,
+		EnvKeys:          []string{"MOONSHOT_API_KEY", "KIMI_API_KEY"},
+		DefaultModel:     "kimi-k3",
 		// The kimi-k2-* variants were discontinued 2026-05-25; these are the
 		// current models per platform.kimi.com/docs/models. moonshot-v1-128k
 		// is kept for existing users (closed to new registrations).
 		Models:        []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5", "moonshot-v1-128k"},
 		ContextWindow: 256_000, // Kimi K2.x family; kimi-k3 and moonshot-v1-128k differ (see modelContextWindows)
 		Notes:         "platform.kimi.com",
-	},
-	{
-		Name:         "kimi-anthropic",
-		Label:        "Moonshot Kimi (Anthropic-compatible)",
-		BaseURL:      "https://api.moonshot.cn/anthropic",
-		Format:       provider.FormatAnthropic,
-		Auth:         provider.AuthBearer,
-		EnvKeys:      []string{"ANTHROPIC_AUTH_TOKEN", "MOONSHOT_API_KEY"},
-		// DefaultModel and Models are inherited from "kimi" (see init).
-		Notes: "Claude-Code-compatible endpoint",
 	},
 	{
 		Name:         "dashscope",
@@ -185,11 +166,11 @@ var presets = []Provider{
 		Notes:         "bailian.console.aliyun.com",
 	},
 	{
-		Name:         "dashscope-intl",
-		Label:        "Alibaba DashScope (international)",
-		BaseURL:      "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-		Format:       provider.FormatOpenAI,
-		EnvKeys:      []string{"DASHSCOPE_API_KEY"},
+		Name:          "dashscope-intl",
+		Label:         "Alibaba DashScope (international)",
+		BaseURL:       "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+		Format:        provider.FormatOpenAI,
+		EnvKeys:       []string{"DASHSCOPE_API_KEY"},
 		DefaultModel:  "qwen-max",
 		Models:        []string{"qwen3.7-max", "qwen3.7-plus", "qwen3-max", "qwen3-coder-plus", "qwen-max", "qwen-plus"},
 		ContextWindow: 256_000, // matches dashscope
@@ -213,11 +194,11 @@ var presets = []Provider{
 		Notes:         "aggregator; model names are namespaced",
 	},
 	{
-		Name:         "siliconflow",
-		Aliases:      []string{"guiji"},
-		Label:        "SiliconFlow",
-		BaseURL:      "https://api.siliconflow.cn/v1",
-		Format:       provider.FormatOpenAI,
+		Name:          "siliconflow",
+		Aliases:       []string{"guiji"},
+		Label:         "SiliconFlow",
+		BaseURL:       "https://api.siliconflow.cn/v1",
+		Format:        provider.FormatOpenAI,
 		EnvKeys:       []string{"SILICONFLOW_API_KEY"},
 		DefaultModel:  "deepseek-ai/DeepSeek-V3",
 		Models:        []string{"deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct"},
@@ -225,10 +206,10 @@ var presets = []Provider{
 		Notes:         "cloud.siliconflow.cn",
 	},
 	{
-		Name:         "ollama",
-		Label:        "Ollama (local)",
-		BaseURL:      "http://localhost:11434/v1",
-		Format:       provider.FormatOpenAI,
+		Name:          "ollama",
+		Label:         "Ollama (local)",
+		BaseURL:       "http://localhost:11434/v1",
+		Format:        provider.FormatOpenAI,
 		EnvKeys:       []string{"OLLAMA_API_KEY"},
 		DefaultModel:  "qwen2.5-coder",
 		Models:        []string{"qwen2.5-coder", "llama3.3", "qwen2.5-vl"},
@@ -237,33 +218,62 @@ var presets = []Provider{
 	},
 }
 
-// anthropicSuffix marks a preset as the Anthropic-compatible ("Claude Code")
-// variant of the base provider that shares its name without the suffix.
+// anthropicSuffix is the legacy spelling of a vendor's Anthropic-compatible
+// endpoint, which used to be a separate preset ("deepseek-anthropic"). Both
+// endpoints serve the same models, so they are now one provider with two
+// wires; the old names still resolve (see Resolve) and keep configuration
+// written against them working.
 const anthropicSuffix = "-anthropic"
 
-// init makes every "<base>-anthropic" variant inherit its DefaultModel and
-// Models from "<base>" when it does not set them itself. The two endpoints
-// serve the same catalogue, so this keeps their model lists identical by
-// construction — they can no longer drift apart the way hand-copied lists do.
-// A variant may still override either field explicitly if a vendor ever
-// diverges.
-func init() {
-	for i := range presets {
-		v := &presets[i]
-		base, ok := index[strings.TrimSuffix(v.Name, anthropicSuffix)]
-		if !ok || base == v || !strings.HasSuffix(v.Name, anthropicSuffix) {
-			continue
-		}
-		if v.DefaultModel == "" {
-			v.DefaultModel = base.DefaultModel
-		}
-		if v.Models == nil {
-			v.Models = base.Models
-		}
-		if v.ContextWindow == 0 {
-			v.ContextWindow = base.ContextWindow
-		}
+// anthropicTokenEnv is the credential variable Claude-Code-compatible
+// gateways conventionally read, tried before a vendor's own key on the
+// Anthropic wire.
+const anthropicTokenEnv = "ANTHROPIC_AUTH_TOKEN"
+
+// Endpoint is one vendor endpoint: where to connect, what wire it speaks,
+// how the credential is presented and where to read it from.
+type Endpoint struct {
+	BaseURL string
+	Format  string
+	Auth    string
+	EnvKeys []string
+}
+
+// Endpoint resolves one wire format to the endpoint serving it. An empty
+// format means the vendor's primary wire. It reports false when the vendor
+// does not offer the requested format, leaving the caller to fall back.
+func (p *Provider) Endpoint(format string) (Endpoint, bool) {
+	primary := Endpoint{BaseURL: p.BaseURL, Format: p.Format, Auth: p.Auth, EnvKeys: p.EnvKeys}
+	if format == "" || format == p.Format {
+		return primary, true
 	}
+	if format == provider.FormatAnthropic && p.AnthropicBaseURL != "" {
+		// Third-party Anthropic gateways authenticate with a bearer token and
+		// accept either the Claude-Code variable or the vendor's own key.
+		return Endpoint{
+			BaseURL: p.AnthropicBaseURL,
+			Format:  provider.FormatAnthropic,
+			Auth:    provider.AuthBearer,
+			EnvKeys: append([]string{anthropicTokenEnv}, p.EnvKeys...),
+		}, true
+	}
+	return primary, false
+}
+
+// Resolve maps a configured provider name to its preset and the wire format
+// that name implies (empty = the preset's primary wire). It accepts canonical
+// names, aliases, and the legacy "<vendor>-anthropic" spelling, which now
+// means "this vendor on its Anthropic wire".
+func Resolve(name string) (*Provider, string, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if p, ok := index[name]; ok {
+		return p, "", true
+	}
+	if base, ok := index[strings.TrimSuffix(name, anthropicSuffix)]; ok &&
+		strings.HasSuffix(name, anthropicSuffix) && base.AnthropicBaseURL != "" {
+		return base, provider.FormatAnthropic, true
+	}
+	return nil, "", false
 }
 
 // modelContextWindows pins the context window (tokens) for individual models
@@ -312,9 +322,11 @@ var index = func() map[string]*Provider {
 	return m
 }()
 
-// Lookup returns the preset for a provider name or alias.
+// Lookup returns the preset for a provider name, alias or legacy
+// "<vendor>-anthropic" spelling, discarding the wire format that name
+// implies. Use Resolve when the wire matters.
 func Lookup(name string) (*Provider, bool) {
-	p, ok := index[strings.ToLower(strings.TrimSpace(name))]
+	p, _, ok := Resolve(name)
 	return p, ok
 }
 

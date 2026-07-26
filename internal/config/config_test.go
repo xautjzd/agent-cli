@@ -239,7 +239,7 @@ func TestPresetMakesProviderZeroConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Provider != "glm" {
+	if cfg.Provider != "zai" {
 		t.Errorf("provider = %q", cfg.Provider)
 	}
 	if cfg.Model == "" || cfg.BaseURL == "" {
@@ -264,7 +264,7 @@ func TestPresetAliasCanonicalizes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// An alias resolves to the canonical name so later lookups agree.
-	if cfg.Provider != "glm" {
+	if cfg.Provider != "zai" {
 		t.Errorf("alias not canonicalized: %q", cfg.Provider)
 	}
 }
@@ -331,8 +331,9 @@ func TestUserProfileShadowsPreset(t *testing.T) {
 func TestPresetSelectsWireFormat(t *testing.T) {
 	isolateHome(t)
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "tok")
-	// An Anthropic-compatible gateway preset must build an Anthropic
-	// client even though the provider name is not a registered built-in.
+	// A vendor addressed over its Anthropic-compatible endpoint must build an
+	// Anthropic client, whether it is named by the legacy "-anthropic"
+	// spelling (here) or by "format": "anthropic".
 	cfg := &Config{Provider: "kimi-anthropic"}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
@@ -345,11 +346,35 @@ func TestPresetSelectsWireFormat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Name() != "kimi-anthropic" {
+	if p.Name() != "kimi" {
 		t.Errorf("provider name = %q", p.Name())
 	}
 	if _, ok := p.(provider.Streamer); !ok {
 		t.Error("expected a streaming-capable client")
+	}
+	// The legacy name is normalized on load: one vendor, on its anthropic wire.
+	if loaded.Provider != "kimi" || loaded.Format != "anthropic" {
+		t.Errorf("legacy name not normalized: provider=%q format=%q", loaded.Provider, loaded.Format)
+	}
+	if loaded.BaseURL != "https://api.moonshot.cn/anthropic" {
+		t.Errorf("anthropic endpoint not selected: %q", loaded.BaseURL)
+	}
+
+	// The same vendor with no wire selected speaks its primary (OpenAI) wire.
+	t.Setenv("MOONSHOT_API_KEY", "mk")
+	openaiWire := &Config{Provider: "kimi"}
+	if err := openaiWire.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.BaseURL != "https://api.moonshot.cn/v1" {
+		t.Errorf("primary endpoint not selected: %q", loaded.BaseURL)
+	}
+	if _, err := loaded.BuildProvider(); err != nil {
+		t.Errorf("primary wire should build: %v", err)
 	}
 }
 
