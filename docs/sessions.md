@@ -27,8 +27,8 @@ automatically on first run.
 > /resume
 Resume a session:
   search: read
-❯ 2m ago     fix the failing tests            deepseek-chat · 12 msgs
-  1h ago     explain repository structure     deepseek-chat · 4 msgs
+❯ 2m ago     fix the failing tests            deepseek-v4-flash · 12 msgs
+  1h ago     explain repository structure     deepseek-v4-flash · 4 msgs
   ↑↓ navigate · type to search · enter select · esc cancel
 ```
 

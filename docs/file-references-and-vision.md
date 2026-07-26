@@ -61,7 +61,7 @@ Image turns are routed by what the active model can actually do:
    ```
    ```
    > @shot.png what does this error mean?
-   🖼 deepseek-chat has no vision — describing image(s) with gpt-4o-mini…
+   🖼 deepseek-v4-flash has no vision — describing image(s) with gpt-4o-mini…
    ```
 
 3. **Neither** → the turn fails **before any API call** with those exact

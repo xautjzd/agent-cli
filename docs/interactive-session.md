@@ -51,7 +51,9 @@ opens a numbered picker.
 |---|---|
 | `/help` | List commands, skills, and usage hints |
 | `/model [name]` | Show or switch the model mid-session |
-| `/provider <name> [model]` | Switch provider (prompts for the API key if none is set, offers to save it) |
+| `/provider [<name> [model]]` | Switch provider (prompts for the API key if none is set, offers to save it); bare lists them all |
+| `/provider custom` | Define a custom provider — asks for name, base URL, API style, model, key |
+| `/provider remove <name>` | Delete a custom provider |
 | `/<skill-name> [task]` | Run any installed skill as a slash command, optionally with a task |
 | `/<command> [args]` | Run a [custom slash command](custom-commands.md) |
 | `/skills` | List installed skills |
@@ -68,6 +70,7 @@ opens a numbered picker.
 | `/goal <text>` | Set a session goal the agent works toward until met (`/goal clear` drops it) |
 | `/plan [task]` | Plan mode: explore read-only, propose a plan, implement on approval |
 | `/mode [hitl\|bypass]` | Show or switch the permission mode |
+| `/effort [level]` | Show or set reasoning effort — only the levels the active model accepts ([details](providers.md#reasoning-effort-is-per-model-not-per-vendor)) |
 | `/usage` | Usage & cost totals + per-model/provider breakdown |
 | `/compact` | Summarize earlier turns to free up context now |
 | `/rewind` | Undo — restore files and trim the conversation to an earlier state |
@@ -80,7 +83,7 @@ opens a numbered picker.
 Example session:
 
 ```
-> /provider openai gpt-4o-mini      # hop providers without losing context
+> /provider openai gpt-5.6-terra    # hop providers without losing context
 > /commit-helper stage and commit my changes
 > explain @internal/repl/repl.go
 > /clear
@@ -104,7 +107,7 @@ Only `write_file` / `edit_file` edits are snapshotted; file changes made by `bas
 - **Streaming** — assistant text and thinking arrive token by token over SSE (with
   `stream_options.include_usage`, so token stats stay accurate). Providers or
   display sinks without streaming fall back to blocking completions automatically.
-- **Thinking** (reasoning models like `deepseek-reasoner`) — shown dim + italic
+- **Thinking** (reasoning models like `deepseek-v4-pro`) — shown dim + italic
   under a `✻ Thinking…` header, visually separate from the final answer.
 - **Tool calls** — rendered as `● ToolName(args)` with CamelCase names. The dot is
   yellow while running, then repainted **green** on success or **red** on failure,

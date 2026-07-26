@@ -38,8 +38,9 @@ Run `agent config show` to print the exact paths in use.
 |---|---|---|---|---|
 | Provider | `-provider` | `AGENT_PROVIDER` | `provider` | none — pick one with `/provider` or `agent provider use` |
 | Model | `-model` | `AGENT_MODEL` | `model` | per provider |
-| API key | — | `AGENT_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY` | `api_key` | — |
+| API key | — | `AGENT_API_KEY`, the vendor's own variable, or `<NAME>_API_KEY` for a custom provider | `api_key` | — |
 | Base URL | — | `AGENT_BASE_URL` | `base_url` | per provider |
+| Wire format | `-format` | `AGENT_FORMAT` | `format` | the vendor's primary wire (`anthropic` picks a Claude-Code endpoint where one exists) |
 | Max turns | — | — | `max_turns` | `40` |
 | Permission mode | `-bypass` | — | `permission_mode` | `hitl` |
 | Bash risk posture | — | — | `bash_policy` | `standard` |
@@ -61,7 +62,8 @@ These keys hold maps or lists, each documented in its own guide:
 
 | Key | Purpose | Guide |
 |---|---|---|
-| `providers` | Named provider profiles | [Providers](providers.md) |
+| `providers` | Custom provider definitions | [Providers](providers.md) |
+| `api_keys` | A credential per provider name, without defining a provider | [Providers](providers.md) |
 | `prices` | Per-model price overrides (USD / 1M tokens) | [Usage & cost](usage-and-cost.md) |
 | `web_search` | Web-search backend + credential | [Web tools](web-tools.md) |
 | `permissions` | Per-tool / path / command approval rules | [Permissions](permissions.md) |
@@ -75,32 +77,55 @@ These keys hold maps or lists, each documented in its own guide:
 ```json
 {
   "provider": "deepseek",
-  "model": "deepseek-chat",
+  "model": "deepseek-v4-flash",
   "max_turns": 40,
   "permission_mode": "hitl",
   "goal_max_rounds": 8,
   "auto_compact": "on",
   "context_limit": 128000,
   "theme": "dracula",
+  "api_keys": {
+    "deepseek": "sk-…"
+  },
   "providers": {
-    "ollama":   {"base_url": "http://localhost:11434/v1", "model": "qwen2.5-coder:32b", "api_key": "ollama"},
-    "moonshot": {"base_url": "https://api.moonshot.cn/v1", "model": "kimi-k2", "env_key": "MOONSHOT_API_KEY"}
+    "my-gw":  {"base_url": "https://llm.internal/v1", "model": "internal-v2"},
+    "gw2":    {"base_url": "https://gw2.example/anthropic", "model": "claude-x",
+               "format": "anthropic", "auth": "bearer"}
   }
 }
 ```
+
+`api_keys` holds a credential for a **built-in** provider — storing one there
+keeps the vendor's endpoint and model list coming from the catalog, whereas an
+entry in `providers` *defines* a provider and takes over that name. `providers`
+entries without an `api_key` read `<NAME>_API_KEY` from the environment.
 
 ## The `agent config` CLI
 
 ```bash
 agent config show                                  # resolved config + both file paths (secrets masked)
 agent config init                                  # write a starter global config.json (0600 perms)
-agent config set model deepseek-chat               # persist to the global file
+agent config set model deepseek-v4-pro             # persist to the global file
 agent config set permission_mode bypass project    # persist to <project>/.agent/config.json
 ```
 
 `agent config set <key> <value> [project]` writes to the global file by default, or
 to the project file when `project` is appended. Values are validated before being
 written — an invalid theme, mode, or number is rejected.
+
+## The `agent provider` CLI
+
+Provider selection has its own subcommand, so it needs no key names:
+
+```bash
+agent provider list                                # every provider + credential status
+agent provider use anthropic claude-sonnet-5       # persist provider (and model)
+agent provider use deepseek --anthropic            # pick a vendor's other wire
+agent provider add                                 # define a custom one (guided)
+agent provider remove my-gw
+```
+
+See **[Providers & models](providers.md)**.
 
 ## The in-session `/config` panel
 

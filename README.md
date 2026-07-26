@@ -2,9 +2,9 @@
 
 A Claude Code–style coding agent CLI written in Go. It runs an agentic tool-use loop
 against the **Anthropic Messages API** (via the official Go SDK) or any
-**OpenAI-compatible** provider (OpenAI, DeepSeek, GLM, Kimi, Qwen, Ollama, or a
-custom endpoint), with built-in file/shell tools, code navigation, skills, and
-project-scoped memory.
+**OpenAI-compatible** provider (OpenAI, Gemini, DeepSeek, Z.AI, Kimi, MiniMax,
+Grok, Qwen, Ollama, or any custom endpoint), with built-in file/shell tools, code
+navigation, skills, and project-scoped memory.
 
 ```bash
 go install github.com/xautjzd/agent-cli/cmd/agent@latest
@@ -21,7 +21,9 @@ cd my-project && agent             # then run /provider to pick a vendor and ent
 - **Code navigation (LSP)** — `lsp_diagnostics`, `lsp_references`, `lsp_definition`,
   `lsp_hover` backed by language servers (gopls, tsserver, pyright, rust-analyzer, clangd).
 - **Multi-provider** — Anthropic and OpenAI-compatible behind one interface, with
-  zero-config presets for common vendors; switch mid-session with `/provider`.
+  zero-config presets for common vendors and custom endpoints you define yourself;
+  switch mid-session with `/provider`, and reasoning effort follows what each model
+  actually accepts.
 - **Permissions & sandbox** — an evasion-resistant risk classifier, per-tool/path/command
   approval rules, an optional command sandbox, and a structured audit log.
 - **Sessions, plan mode & goals** — auto-saved resumable history, read-only planning,

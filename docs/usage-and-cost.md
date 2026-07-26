@@ -42,7 +42,11 @@ Priority order: **models.dev → config `prices` overrides → built-in table**.
   at different prices, the price is matched by **your provider**; when the provider
   is unknown, the model's **most-common** (first-party) price is used, not an
   inflated gateway rate.
-- A small **built-in table** covers offline first runs.
+- A small **built-in table** covers offline first runs (Anthropic, OpenAI,
+  DeepSeek, Gemini, GLM, MiniMax, Grok). Vendors with a long-context or
+  high-speed tier are priced at their **base** tier, so a very long session is
+  under-counted rather than over-counted — override it with `prices` if that
+  matters.
 
 A model with no price anywhere shows **`—`** — its tokens still count. When a model
 is unpriced, `/usage` lists it with a copy-pasteable `"prices"` snippet.

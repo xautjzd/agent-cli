@@ -34,7 +34,7 @@ audit-log dangerous operations for autonomous runs. See [Permissions](permission
   {
     "result": "...",
     "provider": "deepseek",
-    "model": "deepseek-chat",
+    "model": "deepseek-v4-flash",
     "input_tokens": 3021,
     "output_tokens": 288,
     "rounds": 2,
@@ -58,6 +58,7 @@ etc.), so a workflow step fails loudly.
 | `-output text\|json` | Output format (default `text`) |
 | `-bypass` | Auto-approve + audit dangerous operations |
 | `-provider`, `-model` | Override provider/model for this run |
+| `-format` | `openai` or `anthropic` — which wire, for a vendor serving both |
 
 ## GitHub Actions: PR review
 

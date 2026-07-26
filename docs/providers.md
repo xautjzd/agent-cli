@@ -22,7 +22,7 @@ agent provider use kimi --anthropic                 # from the shell: persist th
 
 ```
 > /provider openai gpt-4o-mini    # mid-session, keeps the conversation
-> /model deepseek-reasoner        # switch model only
+> /model deepseek-v4-pro        # switch model only
 ```
 
 `agent provider list` prints the same listing as `/provider` (it is the same
@@ -50,16 +50,19 @@ export ZHIPUAI_API_KEY=...
 agent config set provider zai      # model, base_url and auth resolved automatically
 ```
 
+The rows are in the order `/provider` lists them, which is the table's own order
+in `internal/catalog/catalog.go` rather than alphabetical:
+
 | Preset | Vendor | Wire format | Credential |
 |---|---|---|---|
-| `anthropic` | Anthropic | Anthropic | `ANTHROPIC_API_KEY` |
 | `openai` | OpenAI | OpenAI | `OPENAI_API_KEY` |
+| `anthropic` | Anthropic | Anthropic | `ANTHROPIC_API_KEY` |
+| `google` (`gemini`) | Google (Gemini) | OpenAI-compatible surface | `GEMINI_API_KEY` |
 | `deepseek` | DeepSeek | OpenAI + Anthropic | `DEEPSEEK_API_KEY` |
 | `zai` (`glm`, `zhipu`, `bigmodel`) | Z.AI (GLM models) | OpenAI + Anthropic | `ZHIPUAI_API_KEY` |
 | `kimi` (`moonshot`) | Moonshot Kimi | OpenAI + Anthropic | `MOONSHOT_API_KEY` |
-| `xai` (`grok`) | xAI (Grok) | OpenAI | `XAI_API_KEY` |
-| `google` (`gemini`) | Google (Gemini) | OpenAI-compatible surface | `GEMINI_API_KEY` |
 | `minimax` | MiniMax | OpenAI | `MINIMAX_API_KEY` |
+| `xai` (`grok`) | xAI (Grok) | OpenAI | `XAI_API_KEY` |
 | `dashscope` (`qwen`) | Alibaba DashScope | OpenAI | `DASHSCOPE_API_KEY` |
 | `dashscope-intl` | DashScope (Singapore) | OpenAI | `DASHSCOPE_API_KEY` |
 | `openrouter` | OpenRouter | OpenAI | `OPENROUTER_API_KEY` |
@@ -160,7 +163,7 @@ keeps secrets out of the file:
 ```json
 {
   "provider": "deepseek",
-  "model": "deepseek-chat",
+  "model": "deepseek-v4-flash",
   "providers": {
     "ollama":   {"base_url": "http://localhost:11434/v1", "model": "qwen2.5-coder:32b", "api_key": "ollama"},
     "moonshot": {"base_url": "https://api.moonshot.cn/v1", "model": "kimi-k2", "env_key": "MOONSHOT_API_KEY"}
@@ -255,17 +258,18 @@ formats can coexist:
 
 ```json
 {
-  "provider": "glm",
+  "provider": "qwen-cc",
   "providers": {
-    "glm":  {"format": "anthropic", "auth": "bearer",
-             "base_url": "https://open.bigmodel.cn/api/anthropic",
-             "model": "glm-4.6", "env_key": "ANTHROPIC_AUTH_TOKEN"},
-    "qwen": {"format": "anthropic", "auth": "bearer",
-             "base_url": "https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy",
-             "model": "qwen3-coder-plus", "env_key": "DASHSCOPE_API_KEY"}
+    "qwen-cc": {"format": "anthropic", "auth": "bearer",
+                "base_url": "https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy",
+                "model": "qwen3-coder-plus", "env_key": "DASHSCOPE_API_KEY"}
   }
 }
 ```
+
+Give it a name of its own rather than a preset's: a profile named `zai` or
+`deepseek` **takes over** that name, and the built-in vendor is then only
+reachable through one of its aliases.
 
 **Confirm the exact base URL and model names against your vendor's console** —
 these paths differ per provider and change over time.
@@ -305,7 +309,7 @@ Complete `config.json` files for common setups — drop one into `~/.agent/confi
 ```json
 {
   "provider": "deepseek",
-  "model": "deepseek-chat",
+  "model": "deepseek-v4-flash",
   "providers": {
     "ollama": {
       "base_url": "http://localhost:11434/v1",
@@ -341,7 +345,7 @@ Credentials come from `ANTHROPIC_API_KEY` (or an `ant auth login` profile) — n
   "model": "gpt-4o",
   "providers": {
     "openai":   {"model": "gpt-4o",        "env_key": "OPENAI_API_KEY"},
-    "deepseek": {"model": "deepseek-chat", "env_key": "DEEPSEEK_API_KEY"}
+    "deepseek": {"model": "deepseek-v4-flash", "env_key": "DEEPSEEK_API_KEY"}
   }
 }
 ```
@@ -368,18 +372,22 @@ switches without losing context.
 Any endpoint that speaks the OpenAI chat-completions format works this way — no
 `format` field means OpenAI-compatible.
 
-### Anthropic-compatible gateways (GLM + Qwen)
+### An Anthropic-compatible gateway
+
+For a preset vendor this is built in — `/provider deepseek --anthropic`. For
+anything else, define it:
+
+```bash
+agent provider add qwen-cc --anthropic \
+  --base-url https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy \
+  --model qwen3-coder-plus --env-key DASHSCOPE_API_KEY
+```
 
 ```json
 {
-  "provider": "glm",
+  "provider": "qwen-cc",
   "providers": {
-    "glm": {
-      "format": "anthropic", "auth": "bearer",
-      "base_url": "https://open.bigmodel.cn/api/anthropic",
-      "model": "glm-4.6", "env_key": "ANTHROPIC_AUTH_TOKEN"
-    },
-    "qwen": {
+    "qwen-cc": {
       "format": "anthropic", "auth": "bearer",
       "base_url": "https://dashscope.aliyuncs.com/api/v2/apps/claude-code-proxy",
       "model": "qwen3-coder-plus", "env_key": "DASHSCOPE_API_KEY"
@@ -397,7 +405,7 @@ vendor's own console.
 ```json
 {
   "provider": "deepseek",
-  "model": "deepseek-chat",
+  "model": "deepseek-v4-flash",
   "vision_provider": "openai",
   "vision_model": "gpt-4o-mini"
 }
