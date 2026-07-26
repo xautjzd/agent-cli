@@ -163,7 +163,7 @@ func TestNamesAndModels(t *testing.T) {
 
 func TestCatalogCoversRequestedVendors(t *testing.T) {
 	// The vendors this CLI is expected to configure out of the box.
-	for _, want := range []string{"openai", "anthropic", "deepseek", "zai", "glm", "kimi", "dashscope", "xai", "grok", "google", "gemini"} {
+	for _, want := range []string{"openai", "anthropic", "deepseek", "zai", "glm", "kimi", "dashscope", "xai", "grok", "google", "gemini", "minimax"} {
 		if _, ok := Lookup(want); !ok {
 			t.Errorf("catalog is missing %q", want)
 		}
@@ -203,6 +203,8 @@ func TestContextWindowResolution(t *testing.T) {
 		{"qwen flagship override", "dashscope", "qwen3.7-max", 1_000_000},
 		{"qwen-max family default", "dashscope", "qwen-max", 256_000},
 		{"grok override", "openrouter", "x-ai/grok-4.5", 500_000},
+		{"minimax family default", "minimax", "MiniMax-M2.7", 204_800},
+		{"minimax M3 override to 1M", "minimax", "MiniMax-M3", 1_000_000},
 		{"openrouter namespaced model wins over aggregator default", "openrouter", "anthropic/claude-opus-4-8", 1_000_000},
 		{"openrouter falls back to family default", "openrouter", "openai/gpt-5.6", 128_000},
 		{"model signals its own family regardless of provider", "openai", "claude-opus-4-8", 1_000_000},

@@ -34,3 +34,16 @@ func TestWireMessagesMultimodal(t *testing.T) {
 		t.Errorf("parts key leaked to wire: %s", s)
 	}
 }
+
+// Vision is decided per model where a vendor's line is mixed: MiniMax takes
+// image input on M3 only, so the preset cannot claim it wholesale.
+func TestVisionIsPerModelForMixedLines(t *testing.T) {
+	if !SupportsVision("MiniMax-M3") {
+		t.Error("MiniMax-M3 accepts image and video input")
+	}
+	for _, m := range []string{"MiniMax-M2.7", "MiniMax-M2.5-highspeed", "MiniMax-M2"} {
+		if SupportsVision(m) {
+			t.Errorf("%s is text-only", m)
+		}
+	}
+}

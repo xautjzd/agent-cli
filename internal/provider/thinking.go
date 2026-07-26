@@ -20,7 +20,8 @@ import (
 // platform.kimi.com/docs/guide/use-thinking-models,
 // developers.openai.com/api/docs/guides/reasoning,
 // docs.x.ai/developers/model-capabilities/text/reasoning,
-// ai.google.dev/gemini-api/docs/thinking and .../docs/openai.
+// ai.google.dev/gemini-api/docs/thinking and .../docs/openai,
+// platform.minimaxi.com/docs/api-reference/text-openai-api.
 
 // disableStyle is how "no thinking" is spelled on an OpenAI-compatible wire.
 type disableStyle int
@@ -172,6 +173,15 @@ func SupportedThinking(model string) ThinkingSupport {
 			Thinks: true, CanDisable: true, disable: disableEffortNone,
 			Levels: []Effort{EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
 		}
+
+	case strings.HasPrefix(m, "minimax"):
+		// thinking is {"type": "adaptive"|"disabled"} with no strength levels,
+		// and on the M2 line "disabled" is ignored — thinking stays on — so
+		// only M3 advertises off (platform.minimaxi.com text-openai-api).
+		if strings.HasPrefix(m, "minimax-m3") {
+			return ThinkingSupport{Thinks: true, CanDisable: true, disable: disableThinkingType}
+		}
+		return ThinkingSupport{Thinks: true, disable: disableUnsupported}
 
 	case strings.HasPrefix(m, "gemini"):
 		// Over the OpenAI-compatible surface every Gemini model takes

@@ -59,6 +59,7 @@ agent config set provider zai      # model, base_url and auth resolved automatic
 | `kimi` (`moonshot`) | Moonshot Kimi | OpenAI + Anthropic | `MOONSHOT_API_KEY` |
 | `xai` (`grok`) | xAI (Grok) | OpenAI | `XAI_API_KEY` |
 | `google` (`gemini`) | Google (Gemini) | OpenAI-compatible surface | `GEMINI_API_KEY` |
+| `minimax` | MiniMax | OpenAI | `MINIMAX_API_KEY` |
 | `dashscope` (`qwen`) | Alibaba DashScope | OpenAI | `DASHSCOPE_API_KEY` |
 | `dashscope-intl` | DashScope (Singapore) | OpenAI | `DASHSCOPE_API_KEY` |
 | `openrouter` | OpenRouter | OpenAI | `OPENROUTER_API_KEY` |
@@ -169,6 +170,8 @@ exposes all of it, and models within one vendor disagree:
 | `kimi-k2.5` / `k2.6` | yes | none — toggle only |
 | `gpt-5*` | yes (`reasoning_effort: none`) | minimal … max (exact set is per model) |
 | `gemini-*` | **no** | minimal, low, medium, high |
+| `MiniMax-M3` | yes (`thinking.type`) | none — toggle only |
+| `MiniMax-M2*` | **no** — `disabled` is ignored | none |
 | `grok-4.5`, `grok-4.20-*-reasoning` | **no** — reasoning cannot be disabled | low, medium, high |
 | `grok-4.20-multi-agent-*` | **no** | low, medium, high, xhigh (agent count) |
 | `claude-*` | yes | mapped to thinking budgets |

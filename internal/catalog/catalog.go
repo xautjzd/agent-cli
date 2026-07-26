@@ -150,6 +150,28 @@ var presets = []Provider{
 		Notes:         "platform.kimi.com",
 	},
 	{
+		Name:         "minimax",
+		Aliases:      []string{"minimaxi"},
+		Label:        "MiniMax",
+		BaseURL:      "https://api.minimaxi.com/v1",
+		Format:       provider.FormatOpenAI,
+		EnvKeys:      []string{"MINIMAX_API_KEY", "MINIMAXI_API_KEY"},
+		DefaultModel: "MiniMax-M3",
+		// Per platform.minimaxi.com text-openai-api. The "-highspeed" variants
+		// are the same models on a faster (double-priced) tier.
+		Models: []string{
+			"MiniMax-M3",
+			"MiniMax-M2.7", "MiniMax-M2.7-highspeed",
+			"MiniMax-M2.5", "MiniMax-M2.5-highspeed",
+			"MiniMax-M2.1", "MiniMax-M2.1-highspeed",
+			"MiniMax-M2",
+		},
+		ContextWindow: 204_800, // the M2 line; M3 is 1M (see modelContextWindows)
+		// Only M3 takes image input, so vision is decided per model
+		// (provider.SupportsVision) rather than claimed for the whole preset.
+		Notes: "platform.minimaxi.com",
+	},
+	{
 		Name: "google",
 		// Gemini is the model family, Google the vendor — same split as
 		// GLM/Z.AI, so the family name stays valid as an alias.
@@ -347,6 +369,9 @@ var modelContextWindows = map[string]int{
 	"qwen3-max":    1_000_000,
 	"qwen-plus":    1_000_000,
 	"qwen-turbo":   131_072,
+
+	// MiniMax: the M2 line is 204,800 (the provider default); M3 is 1M.
+	"MiniMax-M3": 1_000_000,
 
 	// xAI: grok-4.5 is 500K (the provider default); the 4.3 / 4.20 line is
 	// 1M and the build preview is narrower.

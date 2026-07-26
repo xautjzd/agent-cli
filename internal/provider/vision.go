@@ -11,6 +11,8 @@ var visionSubstrings = []string{
 	"qwen-vl", "qwen2-vl", "qwen2.5-vl", "qvq",
 	"glm-4v", "glm-4.5v", "pixtral", "llava", "minicpm-v", "internvl",
 	"kimi-vl", "moonshot-v1-8k-vision", "step-1v", "yi-vision",
+	// MiniMax: only M3 takes image (and video) input; the M2 line is text-only.
+	"minimax-m3",
 }
 
 // visionPrefixes cover the OpenAI o-series, where substring matching would

@@ -60,6 +60,16 @@ var prices = map[string]Price{
 	// DeepSeek (approximate, cache-miss rate).
 	"deepseek-v4-flash": {0.14, 0.28},
 	"deepseek-v4-pro":   {0.435, 0.87},
+	// MiniMax (platform.minimaxi.com pay-as-you-go standard tier, CNY per 1M
+	// converted at 6.7819 CNY/USD; M3 above 512k input costs double).
+	"MiniMax-M3":             {0.3096, 1.2386},
+	"MiniMax-M2.7":           {0.3096, 1.2386},
+	"MiniMax-M2.7-highspeed": {0.6193, 2.4772},
+	"MiniMax-M2.5":           {0.3096, 1.2386},
+	"MiniMax-M2.5-highspeed": {0.6193, 2.4772},
+	"MiniMax-M2.1":           {0.3096, 1.2386},
+	"MiniMax-M2.1-highspeed": {0.6193, 2.4772},
+	"MiniMax-M2":             {0.3096, 1.2386},
 	// Google Gemini (ai.google.dev/gemini-api/docs/pricing, paid tier, the
 	// text/image/video input rate; audio input and the > 200k tier cost more
 	// and are not modeled here).
