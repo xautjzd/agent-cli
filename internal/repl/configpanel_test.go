@@ -97,36 +97,72 @@ func TestConfigPanelAutoCompactToggle(t *testing.T) {
 
 func TestConfigPanelEnterEditsText(t *testing.T) {
 	m := newConfigPanel(t)
-	m.find(t, "model")
+	m.find(t, "vision_model")
 
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // open editor
 	if !m.editing {
 		t.Fatal("Enter did not open the inline editor")
-	}
-	// The editor is pre-filled with the current value.
-	if m.editor.Value() == "" {
-		t.Error("editor should pre-fill the current model")
 	}
 	m.editor.SetValue("deepseek-v4-pro")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // commit
 	if m.editing {
 		t.Error("editor still open after commit")
 	}
-	if m.repl.Cfg.Model != "deepseek-v4-pro" {
-		t.Errorf("model = %q, want deepseek-v4-pro", m.repl.Cfg.Model)
+	if m.repl.Cfg.VisionModel != "deepseek-v4-pro" {
+		t.Errorf("vision_model = %q, want deepseek-v4-pro", m.repl.Cfg.VisionModel)
 	}
 	cfg, _ := config.LoadIn("")
-	if cfg.Model != "deepseek-v4-pro" {
-		t.Errorf("model not persisted: %q", cfg.Model)
+	if cfg.VisionModel != "deepseek-v4-pro" {
+		t.Errorf("vision_model not persisted: %q", cfg.VisionModel)
 	}
 
-	// Esc cancels an edit without changing anything.
-	m.find(t, "model")
+	// The editor pre-fills with the current value...
+	m.find(t, "vision_model")
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.editor.Value() != "deepseek-v4-pro" {
+		t.Errorf("editor should pre-fill the current value, got %q", m.editor.Value())
+	}
+	// ...and Esc cancels an edit without changing anything.
 	m.editor.SetValue("scrapped")
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if m.repl.Cfg.Model != "deepseek-v4-pro" {
-		t.Errorf("Esc did not cancel the edit: %q", m.repl.Cfg.Model)
+	if m.repl.Cfg.VisionModel != "deepseek-v4-pro" {
+		t.Errorf("Esc did not cancel the edit: %q", m.repl.Cfg.VisionModel)
+	}
+}
+
+// Provider, model and base URL are shown for context but changed elsewhere
+// (/provider, /model), so neither Enter nor Space may edit them here.
+func TestConfigPanelReadOnlyRows(t *testing.T) {
+	m := newConfigPanel(t)
+	for _, key := range []string{"provider", "model", "base_url"} {
+		before := m.repl.currentValue(key)
+		m.find(t, key)
+
+		m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if m.editing {
+			t.Errorf("%s: Enter opened an editor on a read-only row", key)
+			m.editing = false
+		}
+		m.Update(tea.KeyMsg{Type: tea.KeySpace})
+		if m.editing {
+			t.Errorf("%s: Space opened an editor on a read-only row", key)
+			m.editing = false
+		}
+		if got := m.repl.currentValue(key); got != before {
+			t.Errorf("%s changed from %q to %q", key, before, got)
+		}
+		if !strings.Contains(m.status, "read-only") {
+			t.Errorf("%s: expected a read-only hint, got %q", key, m.status)
+		}
+	}
+}
+
+// The API key carries no useful information masked, so it is not a row.
+func TestConfigPanelHasNoAPIKeyRow(t *testing.T) {
+	for _, s := range configSettings {
+		if s.key == "api_key" {
+			t.Fatal("api_key should not be listed in the config panel")
+		}
 	}
 }
 

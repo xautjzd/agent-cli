@@ -17,13 +17,13 @@ import (
 type settingKind int
 
 const (
-	kindText   settingKind = iota // free text, edited inline on Enter
-	kindInt                       // integer, edited inline on Enter
-	kindSecret                    // like text but the value is masked
-	kindEnum                      // fixed choices, cycled on Space
+	kindText     settingKind = iota // free text, edited inline on Enter
+	kindInt                         // integer, edited inline on Enter
+	kindEnum                        // fixed choices, cycled on Space
+	kindReadOnly                    // shown for context only, not editable here
 )
 
-// setting describes one editable config row.
+// setting describes one config row.
 type setting struct {
 	key     string
 	label   string
@@ -31,13 +31,18 @@ type setting struct {
 	choices []string // for kindEnum
 }
 
+// readOnlyHint tells the user where a kindReadOnly setting is actually
+// changed. Provider, model and endpoint belong together — editing one of
+// them in isolation leaves the session in a half-switched state, so they are
+// only changed through the commands that switch all three coherently.
+const readOnlyHint = "read-only here — use /provider or /model to change"
+
 // configSettings is the ordered list shown in the panel. Enum settings are
 // toggled with Space; the rest open an inline editor on Enter.
 var configSettings = []setting{
-	{"provider", "Provider", kindText, nil},
-	{"model", "Model", kindText, nil},
-	{"api_key", "API key", kindSecret, nil},
-	{"base_url", "Base URL", kindText, nil},
+	{"provider", "Provider", kindReadOnly, nil},
+	{"model", "Model", kindReadOnly, nil},
+	{"base_url", "Provider base URL", kindReadOnly, nil},
 	{"thinking", "Reasoning effort", kindEnum, []string{"off", "low", "medium", "high", "adaptive"}},
 	{"permission_mode", "Permission mode", kindEnum, []string{"hitl", "bypass"}},
 	{"bash_policy", "Bash risk posture", kindEnum, []string{"standard", "strict"}},
@@ -156,6 +161,10 @@ func (m *configModel) toggle() {
 	if !ok {
 		return
 	}
+	if s.kind == kindReadOnly {
+		m.status = readOnlyHint
+		return
+	}
 	if s.kind != kindEnum || len(s.choices) == 0 {
 		m.activate()
 		return
@@ -177,6 +186,10 @@ func (m *configModel) activate() {
 	if !ok {
 		return
 	}
+	if s.kind == kindReadOnly {
+		m.status = readOnlyHint
+		return
+	}
 	if s.kind == kindEnum && len(s.choices) > 0 {
 		m.toggle()
 		return
@@ -185,9 +198,7 @@ func (m *configModel) activate() {
 	ed.Prompt = "  " + s.label + " = "
 	ed.Focus()
 	ed.Width = 48
-	if s.kind == kindSecret {
-		ed.EchoMode = textinput.EchoPassword
-	} else if cur := m.repl.currentValue(s.key); !strings.HasPrefix(cur, "(") {
+	if cur := m.repl.currentValue(s.key); !strings.HasPrefix(cur, "(") {
 		ed.SetValue(cur) // pre-fill with the current value, minus placeholders
 		ed.CursorEnd()
 	}
@@ -272,6 +283,16 @@ func (m *configModel) View() string {
 		s := configSettings[m.visible[i]]
 		name := textwidth.Pad(s.label, labelW)
 		val := m.repl.currentValue(s.key)
+		// Read-only rows stay visible (they are the context for every other
+		// setting) but are dimmed so they don't read as editable.
+		if s.kind == kindReadOnly {
+			row := "  " + name + "  " + styleHint.Render(val)
+			if i == m.sel {
+				row = styleSelected.Render("❯ "+name) + "  " + styleHint.Render(val)
+			}
+			b.WriteString(row + "\n")
+			continue
+		}
 		row := "  " + name + "  " + val
 		if i == m.sel {
 			row = styleSelected.Render("❯ "+name) + "  " + styleMarker.Render(val)

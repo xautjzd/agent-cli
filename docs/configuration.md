@@ -134,14 +134,19 @@ Inside the interactive session, `/config` opens a searchable settings panel
 
 - **↑/↓** move, **type** to filter the list.
 - **Space** toggles a choice value (permission mode, thinking, sandbox, theme…).
-- **Enter** edits a free-text value inline (secrets are masked).
+- **Enter** edits a free-text value inline.
 - **Esc** exits — the panel stays open between edits so you can change several
   settings in a row.
 
-Every change **applies to the running session immediately** and is saved to the
-**global** config:
+**Provider**, **Model** and **Provider base URL** are shown for context but are
+**read-only** here — switch them with [`/provider`](providers.md) and `/model`,
+which change the endpoint, credential and model together. The API key is not
+listed: masked, it says nothing useful (see `agent config set api_key` and the
+environment variables above).
 
-- changing `api_key` / `base_url` rebuilds the provider client on the spot,
+Every other change **applies to the running session immediately** and is saved to
+the **global** config:
+
 - `max_turns` / `goal_max_rounds` / `permission_mode` take effect on the next turn,
 - `theme` re-colors the session immediately.
 

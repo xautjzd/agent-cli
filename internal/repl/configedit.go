@@ -151,8 +151,12 @@ func (r *Repl) configEditTUI(ctx context.Context) error {
 	for {
 		items := make([]pickerItem, len(configSettings))
 		for i, s := range configSettings {
+			label := fmt.Sprintf("%-26s %s", s.label, r.currentValue(s.key))
+			if s.kind == kindReadOnly {
+				label += "  (read-only)"
+			}
 			items[i] = pickerItem{
-				label:      fmt.Sprintf("%-26s %s", s.label, r.currentValue(s.key)),
+				label:      label,
 				filterText: s.label + " " + s.key,
 			}
 		}
@@ -161,6 +165,10 @@ func (r *Repl) configEditTUI(ctx context.Context) error {
 			return nil
 		}
 		s := configSettings[idx]
+		if s.kind == kindReadOnly {
+			fmt.Fprintf(r.Out, "%s is %s\n", s.label, readOnlyHint)
+			continue
+		}
 
 		var value string
 		if s.kind == kindEnum && len(s.choices) > 0 {
