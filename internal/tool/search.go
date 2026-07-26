@@ -189,12 +189,16 @@ func (t *Grep) Execute(_ context.Context, input json.RawMessage) (string, error)
 	return result, nil
 }
 
-// isBinary uses a NUL-byte heuristic over the first 8KB, the same approach
-// git uses to classify files.
+// binarySniffLimit is how many leading bytes decide whether a file is binary.
+// Shared by every reader so grep, read_file and edit_file agree on the verdict.
+const binarySniffLimit = 8192
+
+// isBinary uses a NUL-byte heuristic over the first binarySniffLimit bytes,
+// the same approach git uses to classify files.
 func isBinary(data []byte) bool {
 	n := len(data)
-	if n > 8192 {
-		n = 8192
+	if n > binarySniffLimit {
+		n = binarySniffLimit
 	}
 	for _, b := range data[:n] {
 		if b == 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,57 @@ func resolvePath(workDir, p string) (string, error) {
 		p = filepath.Join(workDir, p)
 	}
 	return filepath.Clean(p), nil
+}
+
+// imageExts are the formats the session can attach as genuine image input
+// (see the @path / Ctrl+V paths in the REPL), so a model that tries to read a
+// screenshot as text is pointed at the mechanism that actually works.
+var imageExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+	".bmp": true, ".tiff": true, ".ico": true,
+}
+
+// readTextFile reads a file for text consumption, rejecting binary content
+// before the whole file is pulled into memory.
+//
+// Two problems this avoids. A binary's bytes are worthless to the model but
+// still cost context — a single stray read of an executable or a .png can spend
+// a large slice of the window on noise and derail the turn. And classifying
+// from a leading sniff means a 100 MB artifact is refused after 8 KB instead of
+// being loaded in full only to be thrown away.
+//
+// ref is the path as the model supplied it, so a suggested retry is spelled the
+// same way the model spells it.
+func readTextFile(path, ref string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	sniff := make([]byte, binarySniffLimit)
+	n, err := io.ReadFull(f, sniff)
+	// Short files are the normal case, not an error; anything else (a
+	// directory, a permission problem) is real and surfaces to the model.
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return "", err
+	}
+	sniff = sniff[:n]
+
+	if isBinary(sniff) {
+		if imageExts[strings.ToLower(filepath.Ext(path))] {
+			return "", fmt.Errorf("%s is an image: read_file returns text only. "+
+				"Ask the user to attach it as \"@%s\" so it is sent as image input", path, ref)
+		}
+		return "", fmt.Errorf("%s is a binary file: read_file returns text only. "+
+			"Use bash (file, strings, xxd) if its bytes matter", path)
+	}
+
+	rest, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	return string(append(sniff, rest...)), nil
 }
 
 // ReadFile returns file contents with line numbers so the model can
@@ -74,12 +126,12 @@ func (t *ReadFile) Execute(_ context.Context, input json.RawMessage) (string, er
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path)
+	content, err := readTextFile(path, args.Path)
 	if err != nil {
 		return "", err
 	}
 
-	lines := strings.Split(string(data), "\n")
+	lines := strings.Split(content, "\n")
 	start := args.Offset
 	if start < 1 {
 		start = 1
@@ -227,11 +279,12 @@ func (t *EditFile) Execute(_ context.Context, input json.RawMessage) (string, er
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path)
+	// The same binary guard as read_file: without it a matched edit would spill
+	// a diff of binary noise into the context via changeReport.
+	content, err := readTextFile(path, args.Path)
 	if err != nil {
 		return "", err
 	}
-	content := string(data)
 	// Snapshot the original before the edit lands, so /rewind can restore it.
 	if t.Snapshot != nil {
 		t.Snapshot.SnapshotFile(path)

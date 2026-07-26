@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -150,6 +151,72 @@ func TestReadWriteFile(t *testing.T) {
 	}
 	if !strings.Contains(out, "line2") || strings.Contains(out, "line1") {
 		t.Errorf("window wrong: %q", out)
+	}
+}
+
+// TestReadFileRefusesBinary pins the guard that keeps binary noise out of the
+// context window: a NUL-bearing file is refused, and an image is refused with a
+// pointer to the @path attachment mechanism that does work.
+func TestReadFileRefusesBinary(t *testing.T) {
+	dir := t.TempDir()
+	r := &ReadFile{WorkDir: dir}
+
+	if err := os.WriteFile(filepath.Join(dir, "a.bin"), []byte("ELF\x00\x01\x02rest"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A NUL past the sniff window must not count: only the leading bytes decide.
+	long := append(bytes.Repeat([]byte("text\n"), 4000), 0x00)
+	if err := os.WriteFile(filepath.Join(dir, "long.txt"), long, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 64)...)
+	if err := os.WriteFile(filepath.Join(dir, "shot.png"), png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runTool(t, r, `{"path":"a.bin"}`)
+	if err == nil {
+		t.Fatalf("expected binary file to be refused, got %q", out)
+	}
+	if !strings.Contains(err.Error(), "binary file") {
+		t.Errorf("error should name the problem, got %q", err)
+	}
+
+	out, err = runTool(t, r, `{"path":"shot.png"}`)
+	if err == nil {
+		t.Fatalf("expected image to be refused, got %q", out)
+	}
+	// The hint must spell the ref the way the model did, so a retry works.
+	if !strings.Contains(err.Error(), `"@shot.png"`) {
+		t.Errorf("image error should point at @path attachment, got %q", err)
+	}
+
+	// A text file larger than the sniff window still reads in full.
+	out, err = runTool(t, r, `{"path":"long.txt","offset":3999,"limit":2}`)
+	if err != nil {
+		t.Fatalf("text file beyond the sniff window must read: %v", err)
+	}
+	if !strings.Contains(out, "text") {
+		t.Errorf("expected content past the sniff window, got %q", out)
+	}
+}
+
+// TestEditFileRefusesBinary covers the same guard on the edit path, where a
+// matched replacement would otherwise emit a diff of binary bytes.
+func TestEditFileRefusesBinary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.bin")
+	if err := os.WriteFile(path, []byte("head\x00tail"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := &EditFile{WorkDir: dir}
+	if out, err := runTool(t, e, `{"path":"a.bin","old_string":"head","new_string":"HEAD"}`); err == nil {
+		t.Fatalf("expected binary edit to be refused, got %q", out)
+	}
+	// The file must be untouched by the refusal.
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "head\x00tail" {
+		t.Errorf("file was modified despite refusal: %q (%v)", data, err)
 	}
 }
 
