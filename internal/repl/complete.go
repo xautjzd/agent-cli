@@ -193,10 +193,16 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 	var options [][2]string // name, description
 	switch cmd {
 	case "provider":
-		// User profiles first; a profile shadows a preset of the same name,
-		// so the preset is skipped to avoid a duplicate suggestion.
-		for name, p := range r.Cfg.Providers {
-			options = append(options, [2]string{name, "your config · " + p.BaseURL})
+		// User profiles first (sorted — they come from a map), then the
+		// built-ins in the catalog's own order; a profile shadows a preset of
+		// the same name, so the preset is skipped to avoid a duplicate.
+		names := make([]string, 0, len(r.Cfg.Providers))
+		for name := range r.Cfg.Providers {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			options = append(options, [2]string{name, "your config · " + r.Cfg.Providers[name].BaseURL})
 		}
 		for _, p := range catalog.All() {
 			if shadowed(r.Cfg.Providers, p) {
@@ -229,9 +235,11 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 		return nil
 	}
 
-	// The effort ladder is ordered by strength, not by name; every other
-	// option set is alphabetized for stable output.
-	if cmd == "effort" {
+	// Some option sets carry a meaningful order of their own: the effort
+	// ladder runs by strength, and providers follow the catalog's order.
+	// Alphabetizing either would scramble a sequence the user reads as one.
+	switch cmd {
+	case "effort", "provider":
 		return markCurrent(filterCandidatesInOrder(options, query), r.currentArgValue(cmd))
 	}
 	return markCurrent(filterCandidates(options, query), r.currentArgValue(cmd))

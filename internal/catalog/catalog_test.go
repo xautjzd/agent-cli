@@ -147,9 +147,21 @@ func TestNamesAndModels(t *testing.T) {
 	if len(names) < 8 {
 		t.Errorf("expected a useful catalog, got %d entries", len(names))
 	}
-	for i := 1; i < len(names); i++ {
-		if names[i-1] > names[i] {
-			t.Errorf("Names() not sorted at %d: %q > %q", i, names[i-1], names[i])
+	// The catalog's order is deliberate — it is what /provider and the
+	// completion popup show — so it is asserted outright rather than left to
+	// sorting. A new vendor must be placed consciously, not appended blindly.
+	want := []string{
+		"openai", "anthropic", "google", "deepseek", "zai", "kimi", "minimax",
+		"xai", "openrouter", "dashscope", "dashscope-intl", "siliconflow", "ollama",
+	}
+	if strings.Join(names, " ") != strings.Join(want, " ") {
+		t.Errorf("Names() = %v\nwant %v", names, want)
+	}
+	// All() presents the same order.
+	all := All()
+	for i, p := range all {
+		if i < len(want) && p.Name != want[i] {
+			t.Errorf("All()[%d] = %q, want %q", i, p.Name, want[i])
 		}
 	}
 	// Models are advisory but must be present for completion to help.

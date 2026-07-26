@@ -14,7 +14,6 @@
 package catalog
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/xautjzd/agent-cli/internal/provider"
@@ -63,26 +62,15 @@ type Provider struct {
 // presets is the built-in provider table. Adding a vendor is a pure
 // addition here — no other code changes (OCP).
 //
+// The order is deliberate and is the order users see: it runs from the
+// frontier labs through the vendors this CLI is most often pointed at, with
+// aggregators, regional endpoints and local runtimes last. All() and Names()
+// preserve it rather than alphabetizing, so a familiar list does not reshuffle
+// as vendors are added.
+//
 // Endpoints and model names change over time; treat this as a convenience
 // layer and override any field in configuration when a vendor moves.
 var presets = []Provider{
-	{
-		Name:         "anthropic",
-		Label:        "Anthropic",
-		Format:       provider.FormatAnthropic,
-		Auth:         provider.AuthAPIKey,
-		EnvKeys:      []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"},
-		DefaultModel: "claude-opus-4-8",
-		Models: []string{
-			"claude-opus-4-8", "claude-sonnet-5", "claude-fable-5",
-			"claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5",
-		},
-		// Claude 5 / Opus 4.x all ship a 1M window; Haiku 4.5 is the
-		// exception at 200K (see modelContextWindows).
-		ContextWindow: 1_000_000,
-		Vision:        true,
-		Notes:         "console.anthropic.com",
-	},
 	{
 		Name:         "openai",
 		Label:        "OpenAI",
@@ -101,6 +89,47 @@ var presets = []Provider{
 		ContextWindow: 1_000_000, // GPT-5 line (gpt-5.6 ~1.05M; others assumed 1M)
 		Vision:        true,
 		Notes:         "platform.openai.com",
+	},
+	{
+		Name:         "anthropic",
+		Label:        "Anthropic",
+		Format:       provider.FormatAnthropic,
+		Auth:         provider.AuthAPIKey,
+		EnvKeys:      []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"},
+		DefaultModel: "claude-opus-4-8",
+		Models: []string{
+			"claude-opus-4-8", "claude-sonnet-5", "claude-fable-5",
+			"claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5",
+		},
+		// Claude 5 / Opus 4.x all ship a 1M window; Haiku 4.5 is the
+		// exception at 200K (see modelContextWindows).
+		ContextWindow: 1_000_000,
+		Vision:        true,
+		Notes:         "console.anthropic.com",
+	},
+	{
+		Name: "google",
+		// Gemini is the model family, Google the vendor — same split as
+		// GLM/Z.AI, so the family name stays valid as an alias.
+		Aliases: []string{"gemini", "googleai", "aistudio"},
+		Label:   "Google (Gemini)",
+		// The OpenAI-compatible surface of the Gemini API; the native
+		// generateContent API is not spoken here.
+		BaseURL:      "https://generativelanguage.googleapis.com/v1beta/openai",
+		Format:       provider.FormatOpenAI,
+		EnvKeys:      []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+		DefaultModel: "gemini-3.6-flash",
+		Models: []string{
+			"gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite",
+			"gemini-3.1-pro-preview", "gemini-3.1-flash-lite",
+			"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+		},
+		// 1M is the documented window for the 2.5 line; ai.google.dev does not
+		// restate it per model for the 3.x line, so this is the family default
+		// rather than a per-model fact.
+		ContextWindow: 1_000_000,
+		Vision:        true,
+		Notes:         "aistudio.google.com/apikey",
 	},
 	{
 		Name:             "deepseek",
@@ -172,30 +201,6 @@ var presets = []Provider{
 		Notes: "platform.minimaxi.com",
 	},
 	{
-		Name: "google",
-		// Gemini is the model family, Google the vendor — same split as
-		// GLM/Z.AI, so the family name stays valid as an alias.
-		Aliases: []string{"gemini", "googleai", "aistudio"},
-		Label:   "Google (Gemini)",
-		// The OpenAI-compatible surface of the Gemini API; the native
-		// generateContent API is not spoken here.
-		BaseURL:      "https://generativelanguage.googleapis.com/v1beta/openai",
-		Format:       provider.FormatOpenAI,
-		EnvKeys:      []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
-		DefaultModel: "gemini-3.6-flash",
-		Models: []string{
-			"gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite",
-			"gemini-3.1-pro-preview", "gemini-3.1-flash-lite",
-			"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
-		},
-		// 1M is the documented window for the 2.5 line; ai.google.dev does not
-		// restate it per model for the 3.x line, so this is the family default
-		// rather than a per-model fact.
-		ContextWindow: 1_000_000,
-		Vision:        true,
-		Notes:         "aistudio.google.com/apikey",
-	},
-	{
 		Name:    "xai",
 		Aliases: []string{"grok", "x.ai"},
 		Label:   "xAI (Grok)",
@@ -216,6 +221,23 @@ var presets = []Provider{
 		// limits but does not say which text models accept images. Set
 		// "vision": true on a profile if yours does.
 		Notes: "console.x.ai",
+	},
+	{
+		Name:         "openrouter",
+		Label:        "OpenRouter",
+		BaseURL:      "https://openrouter.ai/api/v1",
+		Format:       provider.FormatOpenAI,
+		EnvKeys:      []string{"OPENROUTER_API_KEY"},
+		DefaultModel: "openai/gpt-5.6",
+		Models: []string{
+			"openai/gpt-5.6", "anthropic/claude-opus-4-8", "x-ai/grok-4.5",
+			"deepseek/deepseek-chat", "google/gemini-2.5-pro",
+		},
+		// Aggregator: windows are per-underlying-model, so the divergent
+		// ones are pinned in modelContextWindows; this is the fallback.
+		ContextWindow: 128_000,
+		Vision:        true,
+		Notes:         "aggregator; model names are namespaced",
 	},
 	{
 		Name:         "dashscope",
@@ -243,23 +265,6 @@ var presets = []Provider{
 		Models:        []string{"qwen3.7-max", "qwen3.7-plus", "qwen3-max", "qwen3-coder-plus", "qwen-max", "qwen-plus"},
 		ContextWindow: 256_000, // matches dashscope
 		Notes:         "Singapore region",
-	},
-	{
-		Name:         "openrouter",
-		Label:        "OpenRouter",
-		BaseURL:      "https://openrouter.ai/api/v1",
-		Format:       provider.FormatOpenAI,
-		EnvKeys:      []string{"OPENROUTER_API_KEY"},
-		DefaultModel: "openai/gpt-5.6",
-		Models: []string{
-			"openai/gpt-5.6", "anthropic/claude-opus-4-8", "x-ai/grok-4.5",
-			"deepseek/deepseek-chat", "google/gemini-2.5-pro",
-		},
-		// Aggregator: windows are per-underlying-model, so the divergent
-		// ones are pinned in modelContextWindows; this is the fallback.
-		ContextWindow: 128_000,
-		Vision:        true,
-		Notes:         "aggregator; model names are namespaced",
 	},
 	{
 		Name:          "siliconflow",
@@ -409,21 +414,19 @@ func Lookup(name string) (*Provider, bool) {
 	return p, ok
 }
 
-// All returns every preset, sorted by name.
+// All returns every preset, in the table's own order (see presets).
 func All() []Provider {
 	out := make([]Provider, len(presets))
 	copy(out, presets)
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
-// Names returns all canonical preset names, sorted.
+// Names returns all canonical preset names, in the same order as All.
 func Names() []string {
 	names := make([]string, 0, len(presets))
 	for _, p := range presets {
 		names = append(names, p.Name)
 	}
-	sort.Strings(names)
 	return names
 }
 

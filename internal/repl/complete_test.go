@@ -537,3 +537,28 @@ func TestEffortCompletionKeepsLadderOrder(t *testing.T) {
 		t.Errorf("kimi-k3 effort completion = %v", got)
 	}
 }
+
+// The provider popup follows the catalog's own order (frontier labs first,
+// aggregators and local runtimes last), with config profiles ahead of it —
+// alphabetizing would reshuffle a list users learn by position.
+func TestProviderCompletionKeepsCatalogOrder(t *testing.T) {
+	r, _, _ := newTestRepl(t, "")
+	r.Cfg.Providers = map[string]config.ProviderConfig{
+		"work":    {BaseURL: "https://a/v1"},
+		"backup":  {BaseURL: "https://b/v1"},
+		"minimax": {BaseURL: "https://c/v1"}, // shadows the preset
+	}
+	cands := r.completionsFor("/provider ", 10)
+	got := make([]string, len(cands))
+	for i, c := range cands {
+		got[i] = c.text
+	}
+	want := []string{
+		"backup", "minimax", "work", // profiles, sorted
+		"openai", "anthropic", "google", "deepseek", "zai", "kimi",
+		"xai", "openrouter", "dashscope", "dashscope-intl", "siliconflow", "ollama",
+	}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("provider completion order =\n%v\nwant\n%v", got, want)
+	}
+}
