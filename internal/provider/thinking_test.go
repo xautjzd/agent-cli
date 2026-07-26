@@ -37,6 +37,13 @@ func TestEffortsForModel(t *testing.T) {
 		{"deepseek/deepseek-v4-pro", []Effort{EffortAdaptive, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax, EffortOff}},
 		{"gpt-5.6-terra", []Effort{EffortAdaptive, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax, EffortOff}},
 		{"gpt-4o", nil},
+
+		// Grok reasons unconditionally; only the multi-agent checkpoint takes
+		// xhigh, and the non-reasoning checkpoint is a plain model.
+		{"grok-4.5", []Effort{EffortAdaptive, EffortLow, EffortMedium, EffortHigh}},
+		{"grok-4.20-0309-reasoning", []Effort{EffortAdaptive, EffortLow, EffortMedium, EffortHigh}},
+		{"grok-4.20-multi-agent-0309", []Effort{EffortAdaptive, EffortLow, EffortMedium, EffortHigh, EffortXHigh}},
+		{"grok-4.20-0309-non-reasoning", nil},
 	}
 	for _, tc := range cases {
 		got := EffortsFor(tc.model)
@@ -107,6 +114,11 @@ func TestApplyThinkingPerModel(t *testing.T) {
 		{"gpt-5 off uses effort none", "gpt-5.6-terra", EffortOff,
 			chatRequest{ReasoningEffort: "none"}},
 		{"kimi-k3 cannot be switched off", "kimi-k3", EffortOff, chatRequest{}},
+		{"grok cannot be switched off", "grok-4.5", EffortOff, chatRequest{}},
+		{"grok takes high", "grok-4.5", EffortHigh, chatRequest{ReasoningEffort: "high"}},
+		// grok-4.5 has no xhigh: only the multi-agent checkpoint does.
+		{"grok clamps xhigh to high", "grok-4.5", EffortXHigh, chatRequest{ReasoningEffort: "high"}},
+		{"grok multi-agent takes xhigh", "grok-4.20-multi-agent-0309", EffortXHigh, chatRequest{ReasoningEffort: "xhigh"}},
 		{"non-thinking model is left alone", "gpt-4o", EffortOff, chatRequest{}},
 
 		{"glm-5.2 takes max", "glm-5.2", EffortMax, chatRequest{ReasoningEffort: "max"}},
@@ -173,7 +185,7 @@ func boolPtr(b bool) *bool { return &b }
 // Guards the ladder's own consistency: every level a model advertises must be
 // one ParseEffort accepts, or the menu would offer something unparseable.
 func TestAdvertisedLevelsRoundTrip(t *testing.T) {
-	models := []string{"glm-5.2", "glm-4.6", "kimi-k3", "kimi-k2.6", "deepseek-v4-pro", "gpt-5.6-terra", "claude-opus-4-8", "some-unknown-model"}
+	models := []string{"glm-5.2", "glm-4.6", "kimi-k3", "kimi-k2.6", "deepseek-v4-pro", "gpt-5.6-terra", "claude-opus-4-8", "grok-4.5", "some-unknown-model"}
 	for _, m := range models {
 		for _, e := range EffortsFor(m) {
 			got, ok := ParseEffort(string(e))
@@ -197,7 +209,7 @@ func TestEffortOrderIsStableAcrossModels(t *testing.T) {
 	if Efforts()[0] != EffortAdaptive || Efforts()[len(Efforts())-1] != EffortOff {
 		t.Errorf("display order must run adaptive → … → off, got %v", Efforts())
 	}
-	for _, model := range []string{"glm-5.2", "glm-4.6", "kimi-k3", "kimi-k2.6", "deepseek-v4-pro", "gpt-5.6-terra", "claude-opus-4-8", "unknown-model"} {
+	for _, model := range []string{"glm-5.2", "glm-4.6", "kimi-k3", "kimi-k2.6", "deepseek-v4-pro", "gpt-5.6-terra", "claude-opus-4-8", "grok-4.5", "grok-4.20-multi-agent-0309", "unknown-model"} {
 		levels := EffortsFor(model)
 		for i := 1; i < len(levels); i++ {
 			if position[levels[i-1]] >= position[levels[i]] {

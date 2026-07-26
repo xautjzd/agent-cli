@@ -57,6 +57,7 @@ agent config set provider zai      # model, base_url and auth resolved automatic
 | `deepseek` | DeepSeek | OpenAI + Anthropic | `DEEPSEEK_API_KEY` |
 | `zai` (`glm`, `zhipu`, `bigmodel`) | Z.AI (GLM models) | OpenAI + Anthropic | `ZHIPUAI_API_KEY` |
 | `kimi` (`moonshot`) | Moonshot Kimi | OpenAI + Anthropic | `MOONSHOT_API_KEY` |
+| `xai` (`grok`) | xAI (Grok) | OpenAI | `XAI_API_KEY` |
 | `dashscope` (`qwen`) | Alibaba DashScope | OpenAI | `DASHSCOPE_API_KEY` |
 | `dashscope-intl` | DashScope (Singapore) | OpenAI | `DASHSCOPE_API_KEY` |
 | `openrouter` | OpenRouter | OpenAI | `OPENROUTER_API_KEY` |
@@ -166,6 +167,8 @@ exposes all of it, and models within one vendor disagree:
 | `kimi-k2.7-code` | **no** — `disabled` is an error | none |
 | `kimi-k2.5` / `k2.6` | yes | none — toggle only |
 | `gpt-5*` | yes (`reasoning_effort: none`) | minimal … max (exact set is per model) |
+| `grok-4.5`, `grok-4.20-*-reasoning` | **no** — reasoning cannot be disabled | low, medium, high |
+| `grok-4.20-multi-agent-*` | **no** | low, medium, high, xhigh (agent count) |
 | `claude-*` | yes | mapped to thinking budgets |
 
 Levels a model does not accept are hidden from the menu and rejected with an

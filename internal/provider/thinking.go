@@ -18,7 +18,8 @@ import (
 // Sources: api-docs.deepseek.com/guides/thinking_mode,
 // docs.bigmodel.cn/cn/guide/start/concept-param,
 // platform.kimi.com/docs/guide/use-thinking-models,
-// developers.openai.com/api/docs/guides/reasoning.
+// developers.openai.com/api/docs/guides/reasoning,
+// docs.x.ai/developers/model-capabilities/text/reasoning.
 
 // disableStyle is how "no thinking" is spelled on an OpenAI-compatible wire.
 type disableStyle int
@@ -169,6 +170,26 @@ func SupportedThinking(model string) ThinkingSupport {
 		return ThinkingSupport{
 			Thinks: true, CanDisable: true, disable: disableEffortNone,
 			Levels: []Effort{EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
+		}
+
+	case strings.HasPrefix(m, "grok"):
+		// Reasoning cannot be disabled on the Grok line
+		// (docs.x.ai/developers/model-capabilities/text/reasoning), except on
+		// the checkpoints that are non-reasoning models in their own right.
+		// The multi-agent checkpoint adds xhigh, where the level selects how
+		// many agents run rather than how long one thinks.
+		switch {
+		case strings.Contains(m, "non-reasoning"):
+			return ThinkingSupport{}
+		case strings.Contains(m, "multi-agent"):
+			return ThinkingSupport{
+				Thinks: true, disable: disableUnsupported,
+				Levels: []Effort{EffortLow, EffortMedium, EffortHigh, EffortXHigh},
+			}
+		}
+		return ThinkingSupport{
+			Thinks: true, disable: disableUnsupported,
+			Levels: []Effort{EffortLow, EffortMedium, EffortHigh},
 		}
 
 	case strings.HasPrefix(m, "claude"):

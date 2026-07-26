@@ -60,6 +60,14 @@ var prices = map[string]Price{
 	// DeepSeek (approximate, cache-miss rate).
 	"deepseek-v4-flash": {0.14, 0.28},
 	"deepseek-v4-pro":   {0.435, 0.87},
+	// xAI (docs.x.ai/developers/pricing, the < 200k prompt-token tier; the
+	// long-context tier is double and is not modeled here).
+	"grok-4.5":                     {2, 6},
+	"grok-4.3":                     {1.25, 2.5},
+	"grok-4.20-0309-reasoning":     {1.25, 2.5},
+	"grok-4.20-0309-non-reasoning": {1.25, 2.5},
+	"grok-4.20-multi-agent-0309":   {1.25, 2.5},
+	"grok-build-0.1":               {1, 2},
 	// Zhipu GLM (from bigmodel.cn/pricing, RMB standard/base tier — input
 	// length [0,32) — converted to USD at 6.7819 CNY/USD).
 	"glm-5.2":        {1.1796, 4.1286},

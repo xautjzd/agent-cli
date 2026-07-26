@@ -150,6 +150,28 @@ var presets = []Provider{
 		Notes:         "platform.kimi.com",
 	},
 	{
+		Name:    "xai",
+		Aliases: []string{"grok", "x.ai"},
+		Label:   "xAI (Grok)",
+		BaseURL: "https://api.x.ai/v1",
+		Format:  provider.FormatOpenAI,
+		EnvKeys: []string{"XAI_API_KEY", "GROK_API_KEY"},
+		// Per docs.x.ai/developers/models. grok-4.5 is the flagship; the
+		// 4.20 line ships as separate reasoning / non-reasoning / multi-agent
+		// checkpoints rather than as one switchable model.
+		DefaultModel: "grok-4.5",
+		Models: []string{
+			"grok-4.5", "grok-4.3",
+			"grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning",
+			"grok-4.20-multi-agent-0309", "grok-build-0.1",
+		},
+		ContextWindow: 500_000, // grok-4.5; the 4.20/4.3 line is 1M (see modelContextWindows)
+		// Vision is deliberately not claimed: docs.x.ai documents image-input
+		// limits but does not say which text models accept images. Set
+		// "vision": true on a profile if yours does.
+		Notes: "console.x.ai",
+	},
+	{
 		Name:         "dashscope",
 		Aliases:      []string{"qwen", "bailian"},
 		Label:        "Alibaba DashScope (Qwen)",
@@ -301,6 +323,14 @@ var modelContextWindows = map[string]int{
 	"qwen3-max":    1_000_000,
 	"qwen-plus":    1_000_000,
 	"qwen-turbo":   131_072,
+
+	// xAI: grok-4.5 is 500K (the provider default); the 4.3 / 4.20 line is
+	// 1M and the build preview is narrower.
+	"grok-4.3":                     1_000_000,
+	"grok-4.20-0309-reasoning":     1_000_000,
+	"grok-4.20-0309-non-reasoning": 1_000_000,
+	"grok-4.20-multi-agent-0309":   1_000_000,
+	"grok-build-0.1":               256_000,
 
 	// OpenRouter models are namespaced and each carries its underlying
 	// vendor's window, not the aggregator's conservative default.
