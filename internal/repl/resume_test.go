@@ -12,19 +12,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/xautjzd/agent-cli/internal/agent"
+	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/session"
 	"github.com/xautjzd/agent-cli/internal/textwidth"
 )
 
-// TestProviderListingDedupsProfiles reproduces the reported duplicate-entry
-// bug: config profiles named like presets ("glm", "deepseek") must appear
-// once, in the custom section, and be hidden from the built-in list.
-func TestProviderListingDedupsProfiles(t *testing.T) {
+// The two sections answer different questions: "what have I configured" and
+// "what does this CLI know about". A profile that takes a preset's name must
+// not delete the preset from the second — the vendor still exists, and hiding
+// it made the built-in look like it had vanished.
+func TestProviderListingKeepsBuiltinsVisible(t *testing.T) {
 	r, _, out := newTestRepl(t, "")
 	r.Cfg.Providers = map[string]config.ProviderConfig{
-		"glm":      {Format: "anthropic", BaseURL: "https://gw/anthropic", Model: "glm-5.2"},
+		"zai":      {Format: "openai", BaseURL: "https://gw.example/v1", Model: "glm-5.2"},
 		"deepseek": {Format: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"},
 	}
 	if err := r.listProviders(); err != nil {
@@ -36,24 +38,70 @@ func TestProviderListingDedupsProfiles(t *testing.T) {
 	if !found || !strings.Contains(your, "Your providers") {
 		t.Fatalf("missing custom section:\n%s", got)
 	}
-	if !strings.Contains(your, "glm") || !strings.Contains(your, "overrides built-in") {
+	if !strings.Contains(your, "zai") || !strings.Contains(your, "overrides built-in") {
 		t.Errorf("profile not labeled as an override:\n%s", your)
 	}
+
+	// Every preset is listed, in catalog order, whatever the profiles say.
+	var names []string
 	for _, line := range strings.Split(builtin, "\n") {
 		name, _, _ := strings.Cut(strings.TrimSpace(line), " ")
-		// "glm" is an alias of the zai preset, so the profile hides that
-		// preset too — a vendor must never be listed under two names.
-		if name == "glm" || name == "zai" || name == "deepseek" {
-			t.Errorf("overridden preset still shown as built-in: %q", line)
+		if name == "" || strings.HasPrefix(name, "—") {
+			continue
 		}
+		names = append(names, name)
 		// A wire is not a provider: no vendor gets a second "-anthropic" row.
 		if strings.HasSuffix(name, "-anthropic") {
 			t.Errorf("anthropic wire listed as a separate provider: %q", line)
 		}
 	}
-	// A vendor's Anthropic wire is advertised on the vendor's own row.
-	if !strings.Contains(builtin, "kimi") || !strings.Contains(builtin, "--anthropic available") {
-		t.Errorf("anthropic wire not advertised on the vendor row:\n%s", builtin)
+	want := []string{
+		"openai", "anthropic", "google", "deepseek", "zai", "kimi", "minimax",
+		"xai", "openrouter", "dashscope", "dashscope-intl", "siliconflow", "ollama",
+	}
+	if strings.Join(names, " ") != strings.Join(want, " ") {
+		t.Errorf("built-in list = %v\nwant %v", names, want)
+	}
+
+	// The row for kimi still advertises its second wire.
+	if !strings.Contains(builtin, "--anthropic available") {
+		t.Errorf("anthropic wire not advertised on a vendor row:\n%s", builtin)
+	}
+}
+
+// What an overridden preset's row says is asserted on the note itself: the
+// rendered line is truncated to the terminal width, which would make this a
+// test of the width instead.
+func TestOverrideNoteNamesAReachableAlias(t *testing.T) {
+	zai, _ := catalog.Lookup("zai")
+	deepseek, _ := catalog.Lookup("deepseek")
+
+	// No profile: no note, the preset owns its name.
+	none := map[string]config.ProviderConfig{}
+	if note := overrideNote(none, *zai); note != "" {
+		t.Errorf("unclaimed preset should carry no note, got %q", note)
+	}
+
+	// A profile on the canonical name: the built-in is still reachable through
+	// a free alias, and the note says which.
+	owned := map[string]config.ProviderConfig{"zai": {BaseURL: "https://gw/v1"}}
+	if note := overrideNote(owned, *zai); !strings.Contains(note, "/provider glm") {
+		t.Errorf("note should point at a free alias, got %q", note)
+	}
+	// A preset with no spare alias can only report the override.
+	if note := overrideNote(map[string]config.ProviderConfig{"deepseek": {}}, *deepseek); !strings.Contains(note, "overridden by your profile") {
+		t.Errorf("note = %q", note)
+	}
+	// Every alias taken too: fall back to the plain statement.
+	all := map[string]config.ProviderConfig{"zai": {}, "glm": {}, "zhipu": {}, "bigmodel": {}, "z.ai": {}}
+	if note := overrideNote(all, *zai); strings.Contains(note, "/provider") {
+		t.Errorf("no alias is free; note must not promise one: %q", note)
+	}
+
+	// A profile named after an alias does not take the canonical name — it is
+	// a different provider that happens to share one spelling.
+	if _, taken := overriddenBy(map[string]config.ProviderConfig{"glm": {}}, *zai); taken {
+		t.Error("an alias-named profile must not claim the canonical name")
 	}
 }
 
@@ -568,5 +616,40 @@ func TestResumeUnknownID(t *testing.T) {
 	withSessions(t, r)
 	if err := r.dispatch(context.Background(), "/resume nope"); err == nil {
 		t.Fatal("expected error for unknown session")
+	}
+}
+
+// The credential column must name what is actually supplying the key. Saying
+// "<VAR> unset" while a key sat saved in the config, or asking for one at all
+// on a local runtime, both sent users looking for a problem that wasn't there.
+func TestProviderListingReportsTheRealCredentialSource(t *testing.T) {
+	r, _, out := newTestRepl(t, "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-from-env")
+	r.Cfg.APIKeys = map[string]string{"openai": "sk-saved"}
+
+	if err := r.listProviders(); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(out.String(), "\n") {
+		name, _, _ := strings.Cut(strings.TrimSpace(line), " ")
+		switch name {
+		case "openai":
+			if !strings.Contains(line, "key saved") {
+				t.Errorf("a saved key should be reported: %q", line)
+			}
+		case "anthropic":
+			if !strings.Contains(line, "ANTHROPIC_API_KEY ✓") {
+				t.Errorf("the environment variable should be named: %q", line)
+			}
+		case "ollama":
+			if !strings.Contains(line, "no key needed") {
+				t.Errorf("a local runtime needs no credential: %q", line)
+			}
+		case "google":
+			if !strings.Contains(line, "GEMINI_API_KEY unset") {
+				t.Errorf("an unconfigured provider should name the variable to export: %q", line)
+			}
+		}
 	}
 }

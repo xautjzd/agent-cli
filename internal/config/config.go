@@ -49,11 +49,12 @@ type ProviderConfig struct {
 
 // Config is the resolved runtime configuration.
 type Config struct {
-	// Provider selects the vendor: "openai", "deepseek", "custom", or the
-	// name of an entry in Providers.
-	Provider string `json:"provider"`
+	// Provider selects the vendor: a catalog preset ("openai", "deepseek",
+	// …), "custom", or the name of an entry in Providers. Empty means none
+	// has been chosen yet — the session opens and asks.
+	Provider string `json:"provider,omitempty"`
 	// Model is the model identifier, e.g. "gpt-5.6-terra" or "deepseek-v4-flash".
-	Model string `json:"model"`
+	Model string `json:"model,omitempty"`
 	// APIKey authenticates against the provider. Prefer setting it via
 	// environment variable over storing it in the config file.
 	APIKey string `json:"api_key,omitempty"`
@@ -112,6 +113,12 @@ type Config struct {
 	// Providers holds named provider profiles for any OpenAI-compatible
 	// endpoint.
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
+	// APIKeys stores a credential per provider name, for built-in presets
+	// that need nothing but a key. It is deliberately not the Providers map:
+	// an entry there is a full provider definition that takes over the name,
+	// so saving a key that way turned every built-in into a custom profile
+	// shadowing itself. Env vars and an explicit api_key still win.
+	APIKeys map[string]string `json:"api_keys,omitempty"`
 	// LazyTools controls deferred (on-demand) loading of MCP tools. When on
 	// (the default), MCP tools are advertised by name+description in the system
 	// prompt and their full schemas are pulled in via the search_tools meta-tool
@@ -312,7 +319,11 @@ func Load() (*Config, error) {
 // when set; provider profiles merge by name) → environment → named-profile
 // resolution → model default.
 func LoadIn(projectDir string) (*Config, error) {
-	cfg := &Config{Provider: "deepseek", MaxTurns: 40}
+	// No default vendor: picking one is the user's call, made with /provider
+	// in a session or "agent provider use" / "agent config set provider".
+	// Defaulting to a vendor the user has no key for only produced a
+	// credential error about a provider they never chose.
+	cfg := &Config{MaxTurns: 40}
 
 	if path, err := Path(); err == nil {
 		if err := mergeFile(cfg, path); err != nil {
@@ -328,6 +339,7 @@ func LoadIn(projectDir string) (*Config, error) {
 	applyEnv(cfg)
 	resolveProfile(cfg)
 	applyPreset(cfg)
+	applyStoredKey(cfg)
 
 	if cfg.Model == "" {
 		cfg.Model = defaultModel(cfg.Provider)
@@ -434,6 +446,12 @@ func mergeFile(cfg *Config, path string) error {
 			cfg.Providers = map[string]ProviderConfig{}
 		}
 		cfg.Providers[name] = p
+	}
+	for name, key := range layer.APIKeys {
+		if cfg.APIKeys == nil {
+			cfg.APIKeys = map[string]string{}
+		}
+		cfg.APIKeys[name] = key
 	}
 	for name, s := range layer.MCPServers {
 		if cfg.MCPServers == nil {
@@ -649,9 +667,13 @@ func applyPreset(cfg *Config) {
 // that switch selected, and reconciles the top-level base_url: a value the
 // provider supplies itself is cleared, because a stale endpoint from the
 // previous provider would otherwise shadow the profile/preset one on the next
-// load (applyPreset only fills base_url when it is empty). The model is stored
-// only when the caller named one explicitly — otherwise the profile or preset
-// supplies its own on reload, and a pinned model would just go stale.
+// load (applyPreset only fills base_url when it is empty).
+//
+// The model is always written, including the preset's default. Leaving it out
+// made the config file disagree with the banner — the session showed a model
+// the file never mentioned — and a stale model is not a risk here: a top-level
+// model belonging to a different provider is dropped on load
+// (staleForProvider) and replaced by this provider's own.
 func SaveProviderChoice(cfg *Config, model string) error {
 	if err := SetScoped(ScopeGlobal, "", "provider", cfg.Provider); err != nil {
 		return err
@@ -667,7 +689,7 @@ func SaveProviderChoice(cfg *Config, model string) error {
 		return err
 	}
 	if model == "" {
-		return nil
+		model = cfg.Model
 	}
 	return SetScoped(ScopeGlobal, "", "model", model)
 }
@@ -683,6 +705,19 @@ func (c *Config) providerOwnsBaseURL() bool {
 		return true
 	}
 	return false
+}
+
+// applyStoredKey falls back to the credential saved for this provider under
+// "api_keys". It runs last: an explicit api_key, an environment variable and a
+// profile's own key all take precedence, so a stored key is the backstop for a
+// preset the user has otherwise not configured at all.
+func applyStoredKey(cfg *Config) {
+	if cfg.APIKey != "" {
+		return
+	}
+	if key, ok := cfg.APIKeys[cfg.Provider]; ok {
+		cfg.APIKey = key
+	}
 }
 
 // IsNamedProfile reports whether name refers to a providers-map entry
@@ -721,6 +756,7 @@ func LoadForWire(providerName, format string) (*Config, error) {
 	}
 	resolveProfile(cfg)
 	applyPreset(cfg)
+	applyStoredKey(cfg)
 	return cfg, nil
 }
 
@@ -733,6 +769,9 @@ func (c *Config) BuildProvider() (provider.Provider, error) {
 		pc.Auth = p.Auth
 		return provider.NewProfile(c.Provider, p.Format, pc)
 	}
+	if c.Provider == "" {
+		return nil, fmt.Errorf("no provider configured: run \"agent provider list\" to see the options, then \"agent provider use <name>\" (or /provider in a session)")
+	}
 	if p, wire, ok := catalog.Resolve(c.Provider); ok {
 		// A legacy "<vendor>-anthropic" name carries its own wire, so it
 		// still selects the Anthropic endpoint without a "format" key.
@@ -742,7 +781,13 @@ func (c *Config) BuildProvider() (provider.Provider, error) {
 		// (AuthAPIKey) is exempt because it has its own credential paths, but
 		// third-party Anthropic-wire endpoints that authenticate with a bearer
 		// token still require one.
-		if c.APIKey == "" && (ep.Format != provider.FormatAnthropic || ep.Auth == provider.AuthBearer) {
+		// A keyless provider (a local runtime) has nothing to authenticate.
+		// The OpenAI client still wants a non-empty token, so supply a
+		// placeholder rather than demanding one from the user.
+		if p.Keyless && pc.APIKey == "" {
+			pc.APIKey = "none"
+		}
+		if c.APIKey == "" && !p.Keyless && (ep.Format != provider.FormatAnthropic || ep.Auth == provider.AuthBearer) {
 			return nil, fmt.Errorf("provider %s needs a credential: export %s (get one at %s)",
 				p.Name, strings.Join(ep.EnvKeys, " or "), orDefault(p.Notes, "the vendor console"))
 		}
@@ -926,11 +971,18 @@ func (c *Config) Save() error {
 	return c.saveTo(path)
 }
 
-// SaveProviderKey persists an API key for a provider as a named profile in the
-// chosen scope, filling the connection details (base URL, wire format, auth)
-// from the built-in catalog so a bare key is enough to reconnect next time.
-// The format selects which of a vendor's endpoints the profile is pinned to
-// (empty = its primary wire). Existing profile fields are preserved.
+// SaveProviderKey persists an API key for a provider in the chosen scope.
+//
+// Where it goes depends on what the name already is. An existing profile gets
+// the key added to it, since that profile is the provider's definition.
+// Anything else — a built-in preset, or a name with no definition yet — is
+// stored under "api_keys", which holds a credential and nothing else.
+//
+// Writing a full profile instead (as this once did) copied the preset's
+// base_url, format and model into the providers map, turning a built-in into a
+// custom provider that shadowed itself: the vendor then appeared twice, and
+// the copied endpoint silently stopped tracking catalog updates. A key is not
+// a provider definition.
 func SaveProviderKey(scope Scope, projectDir, name, format, key string) error {
 	path, err := pathFor(scope, projectDir)
 	if err != nil {
@@ -942,27 +994,15 @@ func SaveProviderKey(scope Scope, projectDir, name, format, key string) error {
 			return fmt.Errorf("parse existing config: %w", err)
 		}
 	}
-	if cfg.Providers == nil {
-		cfg.Providers = map[string]ProviderConfig{}
+	if prof, ok := cfg.Providers[name]; ok {
+		prof.APIKey = key
+		cfg.Providers[name] = prof
+		return cfg.saveTo(path)
 	}
-	prof := cfg.Providers[name]
-	prof.APIKey = key
-	if p, wire, ok := catalog.Resolve(name); ok {
-		ep, _ := p.Endpoint(orDefault(wire, format))
-		if prof.BaseURL == "" {
-			prof.BaseURL = ep.BaseURL
-		}
-		if prof.Format == "" {
-			prof.Format = ep.Format
-		}
-		if prof.Auth == "" {
-			prof.Auth = ep.Auth
-		}
-		if prof.Model == "" {
-			prof.Model = p.DefaultModel
-		}
+	if cfg.APIKeys == nil {
+		cfg.APIKeys = map[string]string{}
 	}
-	cfg.Providers[name] = prof
+	cfg.APIKeys[name] = key
 	return cfg.saveTo(path)
 }
 

@@ -28,8 +28,20 @@ func TestLoadDefaultsAndEnvOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Provider != "deepseek" || cfg.Model != "deepseek-v4-flash" || cfg.MaxTurns != 40 {
+	// No vendor is assumed: choosing one is the user's call, so a fresh
+	// install starts empty rather than pointing at a provider they have no
+	// key for. The neutral defaults still apply.
+	if cfg.Provider != "" || cfg.Model != "" {
+		t.Errorf("a fresh config must name no provider: %+v", cfg)
+	}
+	if cfg.MaxTurns != 40 {
 		t.Errorf("defaults wrong: %+v", cfg)
+	}
+	// Without a provider there is nothing to build, and the error says how to
+	// choose one rather than naming a vendor the user never picked.
+	_, err = cfg.BuildProvider()
+	if err == nil || !strings.Contains(err.Error(), "agent provider use") {
+		t.Errorf("BuildProvider error = %v; want guidance on choosing a provider", err)
 	}
 
 	t.Setenv("AGENT_PROVIDER", "openai")
@@ -428,5 +440,33 @@ func TestSetPersistsOnlyFileValues(t *testing.T) {
 	cfg, _ := Load()
 	if cfg.Model != "env-model" || cfg.MaxTurns != 7 {
 		t.Errorf("precedence broken: %+v", cfg)
+	}
+}
+
+// A local runtime authenticates nothing. Demanding a credential for it — or
+// prompting for one — is a dead end: there is no key to get.
+func TestKeylessProviderNeedsNoCredential(t *testing.T) {
+	isolateHome(t)
+	t.Setenv("OLLAMA_API_KEY", "")
+
+	cfg, err := LoadFor("ollama")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.APIKey != "" {
+		t.Fatalf("no key should have been resolved: %q", cfg.APIKey)
+	}
+	p, err := cfg.BuildProvider()
+	if err != nil {
+		t.Fatalf("a keyless provider must build without a credential: %v", err)
+	}
+	if p.Name() != "ollama" {
+		t.Errorf("provider name = %q", p.Name())
+	}
+
+	// Providers that do authenticate still say what to export.
+	keyed := &Config{Provider: "deepseek", Model: "deepseek-v4-flash"}
+	if _, err := keyed.BuildProvider(); err == nil || !strings.Contains(err.Error(), "DEEPSEEK_API_KEY") {
+		t.Errorf("a keyed provider must still require its credential, got %v", err)
 	}
 }

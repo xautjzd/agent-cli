@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -45,5 +47,33 @@ func TestVisionIsPerModelForMixedLines(t *testing.T) {
 		if SupportsVision(m) {
 			t.Errorf("%s is text-only", m)
 		}
+	}
+}
+
+// The placeholder must not swallow the reason it exists: every request fails
+// with the original setup error, so a session that was opened unconfigured
+// says the same thing on its first turn that startup would have said.
+func TestUnconfiguredCarriesItsError(t *testing.T) {
+	setup := errors.New("provider deepseek needs a credential")
+	p := Unconfigured(setup)
+
+	if _, err := p.Chat(context.Background(), Request{}); !errors.Is(err, setup) {
+		t.Errorf("Chat error = %v, want the setup error", err)
+	}
+	got, ok := SetupError(p)
+	if !ok || !errors.Is(got, setup) {
+		t.Errorf("SetupError = %v, %v", got, ok)
+	}
+	// A working provider is not mistaken for a placeholder.
+	real, err := New("custom", Config{APIKey: "k", BaseURL: "https://x/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := SetupError(real); ok {
+		t.Error("a built provider must not report a setup error")
+	}
+	// A nil reason still produces a usable error rather than a nil panic.
+	if _, err := Unconfigured(nil).Chat(context.Background(), Request{}); err == nil {
+		t.Error("Unconfigured(nil) must still fail requests")
 	}
 }

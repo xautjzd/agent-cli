@@ -8,8 +8,7 @@ project-scoped memory.
 
 ```bash
 go install github.com/xautjzd/agent-cli/cmd/agent@latest
-export DEEPSEEK_API_KEY=sk-...     # or ANTHROPIC_API_KEY / OPENAI_API_KEY / …
-cd my-project && agent
+cd my-project && agent             # then run /provider to pick a vendor and enter its key
 ```
 
 ## Features
@@ -45,10 +44,12 @@ Requires **Go 1.22+**. The result is a single static binary.
 ## Quick start
 
 ```bash
-# 1. Configure a provider (pick one)
-export DEEPSEEK_API_KEY=sk-...                                   # DeepSeek (default)
-export AGENT_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-...     # or Anthropic
-export AGENT_PROVIDER=openai   OPENAI_API_KEY=sk-...             # or OpenAI
+# 1. Pick a provider — no vendor is assumed
+agent provider list                                              # see them all
+agent provider use anthropic                                     # persists the choice
+# …or export one for this shell only:
+export AGENT_PROVIDER=openai   OPENAI_API_KEY=sk-...
+export AGENT_PROVIDER=deepseek DEEPSEEK_API_KEY=sk-...
 
 # 2. Run interactively in your project directory
 cd my-project

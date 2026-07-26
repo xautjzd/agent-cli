@@ -943,11 +943,18 @@ func (r *Repl) cmdModel(_ context.Context, args string) error {
 		r.Cfg.ContextLimit = w
 		r.Agent.ContextLimit = w
 	}
+	// Persist it, like /provider and /effort do: a switch that vanishes on
+	// restart is a setting the user has to make twice.
+	saved := "saved"
+	if err := config.SetScoped(config.ScopeGlobal, "", "model", args); err != nil {
+		fmt.Fprintln(r.Out, "warning: could not persist model:", err)
+		saved = "session only"
+	}
 	// Re-render so the banner's model/context reflect the switch immediately.
 	// This resets the scrollback, so it must run before the confirmation line
 	// below (which would otherwise be wiped).
 	r.redrawTranscript()
-	fmt.Fprintf(r.Out, "Switched model to %s\n", args)
+	fmt.Fprintf(r.Out, "Switched model to %s (%s)\n", args, saved)
 	r.stripImagesIfNeeded()
 	return nil
 }
@@ -994,9 +1001,8 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 	r.Agent.SetProvider(p, cfg.Model)
 	r.Cfg = cfg
 	// Persist the switch to the global config so it survives restarts, matching
-	// how /effort stores its choice. The model is only written when the caller
-	// named one explicitly; otherwise the profile/preset supplies its own model
-	// on the next load, so pinning a top-level model would just go stale.
+	// how /effort stores its choice. The model goes in too, default included,
+	// so the file says what the session is actually running.
 	saved := "saved"
 	if err := config.SaveProviderChoice(cfg, model); err != nil {
 		fmt.Fprintln(r.Out, "warning: could not persist the switch:", err)
@@ -1117,11 +1123,10 @@ func WriteProviderList(w io.Writer, cfg *config.Config, width int, switchHint st
 	for _, p := range catalog.All() {
 		// A profile naming this preset — by its canonical name or an alias —
 		// shadows it entirely; don't list it twice.
-		if shadowed(cfg.Providers, p) {
-			continue
-		}
-		// Name the credential variable actually supplying the key (or the
-		// first expected one) — a missing key is the usual switch failure.
+		// Name whatever is actually supplying the key — the environment
+		// variable, or one saved to the config — since a missing credential is
+		// the usual switch failure. Falling back to "<VAR> unset" while a
+		// saved key sat in the file was simply wrong.
 		cred := p.EnvKeys[0] + " unset"
 		for _, k := range p.EnvKeys {
 			if os.Getenv(k) != "" {
@@ -1129,11 +1134,22 @@ func WriteProviderList(w io.Writer, cfg *config.Config, width int, switchHint st
 				break
 			}
 		}
+		if cred == p.EnvKeys[0]+" unset" && cfg.APIKeys[p.Name] != "" {
+			cred = "key saved ✓"
+		}
+		if p.Keyless {
+			cred = "no key needed"
+		}
 		desc := fmt.Sprintf("%s · %s · %s", p.Label, p.DefaultModel, cred)
 		if p.AnthropicBaseURL != "" {
 			desc += " · --anthropic available"
 		}
-		if p.Notes != "" {
+		// An overridden preset stays in the list — it is a real vendor, and
+		// hiding it made the built-in look like it had disappeared — but the
+		// row says the name now points at a profile.
+		if note := overrideNote(cfg.Providers, p); note != "" {
+			desc += " · " + note
+		} else if p.Notes != "" {
 			desc += " · " + p.Notes
 		}
 		rows = append(rows, [2]string{p.Name, desc})
@@ -1141,18 +1157,40 @@ func WriteProviderList(w io.Writer, cfg *config.Config, width int, switchHint st
 	textwidth.WriteList(w, rows, width, 1)
 }
 
-// shadowed reports whether a user profile takes over a preset — either under
-// its canonical name or one of its aliases, both of which resolve to it.
-func shadowed(profiles map[string]config.ProviderConfig, p catalog.Provider) bool {
+// overriddenBy reports the config profile that has taken over a preset's
+// name. Resolution is by exact name (see config.applyPreset), so a profile
+// named after an alias does not take the canonical name — it is simply
+// another provider that happens to share a spelling with one alias.
+func overriddenBy(profiles map[string]config.ProviderConfig, p catalog.Provider) (string, bool) {
 	if _, ok := profiles[p.Name]; ok {
-		return true
+		return p.Name, true
 	}
+	return "", false
+}
+
+// freeAlias returns a name that still reaches the preset when a profile has
+// taken over its canonical name, or "" when the preset has no spare alias.
+// This is what keeps an overridden built-in usable: "/provider glm" reaches
+// the Z.AI preset even when a "zai" profile owns that name.
+func freeAlias(profiles map[string]config.ProviderConfig, p catalog.Provider) string {
 	for _, a := range p.Aliases {
-		if _, ok := profiles[a]; ok {
-			return true
+		if _, taken := profiles[a]; !taken {
+			return a
 		}
 	}
-	return false
+	return ""
+}
+
+// overrideNote describes what a profile has done to a preset's name, and how
+// to reach the preset anyway.
+func overrideNote(profiles map[string]config.ProviderConfig, p catalog.Provider) string {
+	if _, ok := overriddenBy(profiles, p); !ok {
+		return ""
+	}
+	if alias := freeAlias(profiles, p); alias != "" {
+		return "your profile owns this name — built-in is /provider " + alias
+	}
+	return "overridden by your profile of the same name"
 }
 
 func (r *Repl) cmdSkills(_ context.Context, _ string) error {

@@ -555,7 +555,10 @@ func TestProviderCompletionKeepsCatalogOrder(t *testing.T) {
 	}
 	want := []string{
 		"backup", "minimax", "work", // profiles, sorted
-		"openai", "anthropic", "google", "deepseek", "zai", "kimi",
+		// Every built-in follows, in catalog order — including minimax, whose
+		// name the profile has taken: the vendor still exists and the row says
+		// what happened to the name.
+		"openai", "anthropic", "google", "deepseek", "zai", "kimi", "minimax",
 		"xai", "openrouter", "dashscope", "dashscope-intl", "siliconflow", "ollama",
 	}
 	if strings.Join(got, " ") != strings.Join(want, " ") {

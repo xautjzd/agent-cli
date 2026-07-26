@@ -205,12 +205,15 @@ func (r *Repl) argumentCandidates(value string, start, pos int) []candidate {
 			options = append(options, [2]string{name, "your config · " + r.Cfg.Providers[name].BaseURL})
 		}
 		for _, p := range catalog.All() {
-			if shadowed(r.Cfg.Providers, p) {
-				continue
-			}
 			desc := p.Label + " · " + p.DefaultModel
 			if p.AnthropicBaseURL != "" {
 				desc += " · --anthropic available"
+			}
+			// A preset whose name a profile has taken is still listed — it is
+			// a real vendor — but the row says so, and names the alias that
+			// still reaches it.
+			if note := overrideNote(r.Cfg.Providers, p); note != "" {
+				desc += " · " + note
 			}
 			options = append(options, [2]string{p.Name, desc})
 		}

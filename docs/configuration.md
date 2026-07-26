@@ -36,7 +36,7 @@ Run `agent config show` to print the exact paths in use.
 
 | Setting | Flag | Env var | Config key | Default |
 |---|---|---|---|---|
-| Provider | `-provider` | `AGENT_PROVIDER` | `provider` | `deepseek` |
+| Provider | `-provider` | `AGENT_PROVIDER` | `provider` | none — pick one with `/provider` or `agent provider use` |
 | Model | `-model` | `AGENT_MODEL` | `model` | per provider |
 | API key | — | `AGENT_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY` | `api_key` | — |
 | Base URL | — | `AGENT_BASE_URL` | `base_url` | per provider |

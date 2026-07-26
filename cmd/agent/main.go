@@ -233,7 +233,12 @@ func run(args []string) error {
 	if *modelFlag != "" {
 		cfg.Model = *modelFlag
 	}
-	if cfg.Model == "" {
+	// A missing model is only fatal where nobody can fix it: an interactive
+	// session opens and /provider picks both provider and model.
+	if cfg.Model == "" && *prompt != "" {
+		if cfg.Provider == "" {
+			return fmt.Errorf("no provider configured: run \"agent provider use <name>\" (see \"agent provider list\"), or pass -provider")
+		}
 		return fmt.Errorf("no model configured for provider %q; pass -model or set AGENT_MODEL", cfg.Provider)
 	}
 	// Apply the configured color theme before anything renders.
@@ -245,7 +250,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	sess, err := buildSession(cfg, workDir)
+	sess, err := buildSession(cfg, workDir, *prompt == "")
 	if sess != nil {
 		// Terminate MCP child processes and connections on exit.
 		defer sess.MCP.Close()
@@ -406,10 +411,23 @@ func (s *ciSink) OnStreamEnd() {
 // buildSession wires all dependencies together. This is the composition
 // root: the only place where concrete types meet the interfaces they
 // satisfy.
-func buildSession(cfg *config.Config, workDir string) (*repl.Repl, error) {
+// buildSession assembles the session. interactive marks a run that has a
+// human at the keyboard: those start even when the provider cannot be built,
+// because /provider inside the session is how a missing key gets fixed. A
+// one-shot run has nobody to fix it, so it fails outright.
+func buildSession(cfg *config.Config, workDir string, interactive bool) (*repl.Repl, error) {
 	p, err := cfg.BuildProvider()
 	if err != nil {
-		return nil, err
+		if !interactive {
+			return nil, err
+		}
+		if cfg.Provider == "" {
+			fmt.Fprintln(os.Stderr, "No provider configured yet — run /provider to pick one (it prompts for the API key and saves it).")
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: %v\n         set one with /provider %s, or export the variable and restart.\n",
+				err, cfg.Provider)
+		}
+		p = provider.Unconfigured(err)
 	}
 
 	// Move any personal scratch data left in the working tree by older
@@ -1237,12 +1255,16 @@ func runConfig(args []string) error {
 		}
 		return nil
 	case "init":
-		cfg := &config.Config{Provider: "deepseek", Model: "deepseek-v4-flash", MaxTurns: 40}
+		// No vendor is chosen here: that is the user's call, and writing one
+		// in only produced a credential error for a provider they never
+		// picked. The file carries the neutral defaults; the next line says
+		// how to choose.
+		cfg := &config.Config{MaxTurns: 40}
 		if err := cfg.Save(); err != nil {
 			return err
 		}
 		path, _ := config.Path()
-		fmt.Printf("Wrote %s — edit it or set AGENT_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY.\n", path)
+		fmt.Printf("Wrote %s\n\nPick a provider next:\n  agent provider list\n  agent provider use <name>\n\nOr start the session and run /provider — it prompts for the API key and saves it.\n", path)
 		return nil
 	case "set":
 		if len(args) < 3 {

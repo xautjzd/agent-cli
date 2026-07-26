@@ -53,6 +53,10 @@ type Provider struct {
 	// family window are listed in modelContextWindows. Zero means unknown,
 	// which leaves the conservative global default in force.
 	ContextWindow int
+	// Keyless marks a provider that authenticates nothing — a local runtime
+	// on localhost. Configuration must not demand a credential for it, and
+	// must not prompt for one.
+	Keyless bool
 	// Vision marks providers whose listed models accept image input.
 	Vision bool
 	// Notes is a short hint shown in listings (where to get a key, etc.).
@@ -287,6 +291,7 @@ var presets = []Provider{
 		DefaultModel:  "qwen2.5-coder",
 		Models:        []string{"qwen2.5-coder", "llama3.3", "qwen2.5-vl"},
 		ContextWindow: 32_768, // local models default to a modest window
+		Keyless:       true,
 		Notes:         "no API key required",
 	},
 }

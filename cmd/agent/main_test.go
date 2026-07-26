@@ -12,6 +12,7 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/xautjzd/agent-cli/internal/config"
+	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
@@ -239,5 +240,50 @@ func TestProviderUsePersistsTheSwitch(t *testing.T) {
 	}
 	if err := runProvider([]string{"frobnicate"}); err == nil {
 		t.Error("an unknown subcommand should be an error")
+	}
+}
+
+// A fresh install has no credential yet. An interactive run must still open —
+// /provider inside the session is where the key gets set — while a one-shot
+// run, which has nobody to fix it, must fail outright.
+func TestUnconfiguredProviderStartsInteractiveOnly(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	for _, v := range []string{"DEEPSEEK_API_KEY", "AGENT_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"} {
+		t.Setenv(v, "")
+	}
+	cfg := &config.Config{Provider: "deepseek", Model: "deepseek-v4-flash", MaxTurns: 40}
+
+	sess, err := buildSession(cfg, t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("interactive session must open without a credential: %v", err)
+	}
+	defer sess.MCP.Close()
+	defer sess.LSP.Close()
+
+	// The failure is deferred, not discarded: the placeholder still carries it.
+	setupErr, placeholder := provider.SetupError(sess.Agent.Provider)
+	if !placeholder {
+		t.Fatal("expected an unconfigured placeholder provider")
+	}
+	if setupErr == nil || !strings.Contains(setupErr.Error(), "DEEPSEEK_API_KEY") {
+		t.Errorf("placeholder should carry the setup error, got %v", setupErr)
+	}
+
+	if _, err := buildSession(cfg, t.TempDir(), false); err == nil {
+		t.Error("a one-shot run must fail rather than start unconfigured")
+	}
+
+	// The same holds when no vendor has been chosen at all — the state a
+	// fresh "agent config init" leaves behind.
+	blank := &config.Config{MaxTurns: 40}
+	fresh, err := buildSession(blank, t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("a session with no provider chosen must still open: %v", err)
+	}
+	defer fresh.MCP.Close()
+	defer fresh.LSP.Close()
+	if setupErr, ok := provider.SetupError(fresh.Agent.Provider); !ok ||
+		!strings.Contains(setupErr.Error(), "no provider configured") {
+		t.Errorf("placeholder should explain that nothing is configured, got %v", setupErr)
 	}
 }

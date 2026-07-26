@@ -182,9 +182,11 @@ func (r *Repl) printBanner(w io.Writer) {
 	th := theme.Current()
 
 	effort, _ := provider.ParseEffort(r.Cfg.Thinking)
+	// A fresh install has chosen no vendor yet; say so plainly instead of
+	// rendering blank rows the user cannot interpret.
 	rows := [][2]string{
-		{"provider", r.Cfg.Provider},
-		{"model", r.Cfg.Model},
+		{"provider", orDefault(r.Cfg.Provider, "(none — run /provider)")},
+		{"model", orDefault(r.Cfg.Model, "(none)")},
 		{"effort", string(effort)},
 		{"context", abbrevTokens(r.Cfg.ContextLimit) + " tokens"},
 		{"cwd", abbrevHome(r.WorkDir)},

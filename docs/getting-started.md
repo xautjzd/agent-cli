@@ -17,24 +17,35 @@ Requires **Go 1.22+**. The result is a single static binary named `agent`.
 
 ## Configure a provider
 
-Pick one provider and export its credential. DeepSeek is the default provider, so
-just exporting its key is enough:
+No vendor is assumed — you pick one. The quickest path is from inside a session:
 
 ```bash
-export DEEPSEEK_API_KEY=sk-...                                  # DeepSeek (default)
-export AGENT_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-...    # or Anthropic
-export AGENT_PROVIDER=openai   OPENAI_API_KEY=sk-...            # or OpenAI
+agent            # starts even with nothing configured
+> /provider      # lists every provider; picking one prompts for the API key and saves it
 ```
 
-Many other vendors ship as zero-config presets (GLM, Kimi, Qwen, OpenRouter,
-SiliconFlow, Ollama…). See **[Providers & models](providers.md)**.
+From the shell, the same thing without starting a session:
 
-To persist a choice instead of exporting env vars every time:
+```bash
+agent provider list            # what exists, and whether its credential is exported
+agent provider use anthropic   # persists the choice (add a model to pin one)
+```
+
+Or point it at a vendor for one run with environment variables:
+
+```bash
+export AGENT_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-...
+export AGENT_PROVIDER=openai   OPENAI_API_KEY=sk-...
+export AGENT_PROVIDER=deepseek DEEPSEEK_API_KEY=sk-...
+```
+
+Most vendors ship as zero-config presets (Gemini, GLM, Kimi, MiniMax, Grok, Qwen,
+OpenRouter, SiliconFlow, Ollama…) — naming one is the whole configuration. See
+**[Providers & models](providers.md)**.
 
 ```bash
 agent config init                      # write a starter ~/.agent/config.json (0600)
-agent config set provider deepseek
-agent config set model deepseek-chat
+agent config set provider deepseek     # equivalent to "agent provider use deepseek"
 agent config show                      # see the resolved config + file paths
 ```
 
