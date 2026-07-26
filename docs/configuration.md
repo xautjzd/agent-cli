@@ -53,6 +53,7 @@ Run `agent config show` to print the exact paths in use.
 | Context window | — | — | `context_limit` | `128000` |
 | Deferred tool loading | — | — | `lazy_tools` | `on` |
 | Color theme | — | — | `theme` | `dark` |
+| Web search engine | — | — | `web_search_provider` (writes `web_search.provider`) | `duckduckgo` — see [web tools](web-tools.md) |
 | Vision provider | — | — | `vision_provider` | — |
 | Vision model | — | — | `vision_model` | — |
 
@@ -148,7 +149,8 @@ Every other change **applies to the running session immediately** and is saved t
 the **global** config:
 
 - `max_turns` / `goal_max_rounds` / `permission_mode` take effect on the next turn,
-- `theme` re-colors the session immediately.
+- `theme` re-colors the session immediately,
+- `web_search_provider` repoints `web_search` at once, subagents included.
 
 One-liner form: `/config set <key> <value> [global|project|session]`. The `session`
 scope applies the value without persisting it.

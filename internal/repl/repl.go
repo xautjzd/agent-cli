@@ -38,6 +38,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/theme"
 	"github.com/xautjzd/agent-cli/internal/tool"
 	"github.com/xautjzd/agent-cli/internal/usage"
+	"github.com/xautjzd/agent-cli/internal/webtool"
 )
 
 // errExit signals a clean user-requested shutdown of the loop.
@@ -78,6 +79,11 @@ type Repl struct {
 	// Spawner backs the "task" tool's subagent delegation; nil disables the
 	// /agents listing. Used only to enumerate subagent types for display.
 	Spawner *subagent.Spawner
+
+	// Search is the web_search tool's swappable backend, shared with the
+	// subagent tool sets, so /config can change the search engine live; nil
+	// leaves the engine fixed until restart.
+	Search *webtool.Switchable
 
 	// gateMu serializes BeforeToolCall so concurrent subagents cannot
 	// interleave permission prompts or their output.

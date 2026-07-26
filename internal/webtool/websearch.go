@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // Result is one web-search hit.
@@ -21,6 +22,46 @@ type Searcher interface {
 	Name() string
 	// Search returns up to count results for the query.
 	Search(ctx context.Context, query string, count int) ([]Result, error)
+}
+
+// Switchable is a Searcher whose backend can be replaced while the agent is
+// running, so the search engine can be changed from /config without a restart.
+// The tool holds one of these rather than a backend directly: the same value is
+// shared with every subagent's tool set, so one swap reaches all of them.
+type Switchable struct {
+	mu      sync.RWMutex
+	current Searcher
+}
+
+// NewSwitchable wraps a backend so it can be swapped later.
+func NewSwitchable(s Searcher) *Switchable { return &Switchable{current: s} }
+
+// Set replaces the backend. Searches already in flight keep the old one.
+func (s *Switchable) Set(next Searcher) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.current = next
+}
+
+func (s *Switchable) get() Searcher {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.current
+}
+
+func (s *Switchable) Name() string {
+	if cur := s.get(); cur != nil {
+		return cur.Name()
+	}
+	return "none"
+}
+
+func (s *Switchable) Search(ctx context.Context, query string, count int) ([]Result, error) {
+	cur := s.get()
+	if cur == nil {
+		return nil, fmt.Errorf("web search is not configured")
+	}
+	return cur.Search(ctx, query, count)
 }
 
 // WebSearch is the tool the agent calls to find current information.

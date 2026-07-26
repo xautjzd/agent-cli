@@ -454,10 +454,13 @@ func buildSession(cfg *config.Config, workDir string, interactive bool) (*repl.R
 	}
 
 	// Web tools: web_search finds current docs/APIs/errors, web_fetch reads a
-	// page. The search backend is keyless DuckDuckGo by default; Brave/Tavily
-	// via config. web_fetch's optional prompt is answered by distilling the
-	// fetched page with the model (Claude Code style).
-	searcher := webtool.NewSearcher(cfg.WebSearch.Provider, cfg.WebSearchKey(), nil)
+	// page. The search backend is keyless DuckDuckGo by default; other engines
+	// (Bing, Bing CN, Baidu, Yahoo) and the API-key ones (Brave, Tavily) come
+	// from config. It is wrapped so /config can switch engines live: the same
+	// value goes into every subagent's tool set, so one swap reaches them all.
+	// web_fetch's optional prompt is answered by distilling the fetched page
+	// with the model (Claude Code style).
+	searcher := webtool.NewSwitchable(webtool.NewSearcher(cfg.WebSearch.Provider, cfg.WebSearchCredentials(), nil))
 	extract := func(ctx context.Context, prompt, content string) (string, error) {
 		resp, err := p.Chat(ctx, provider.Request{
 			Model: cfg.Model,
@@ -582,6 +585,7 @@ func buildSession(cfg *config.Config, workDir string, interactive bool) (*repl.R
 		Tools:         registry,
 		MCP:           mcpMgr,
 		Spawner:       spawner,
+		Search:        searcher,
 		Policy:        buildPolicy(cfg, workDir),
 		Audit:         permission.NewAuditLogger(session.AuditLogPath(workDir)),
 		SandboxActive: sbox.Available(),

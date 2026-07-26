@@ -20,6 +20,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/theme"
+	"github.com/xautjzd/agent-cli/internal/webtool"
 )
 
 // ProviderConfig is one named provider profile, e.g.
@@ -154,14 +155,19 @@ type Config struct {
 	Theme string `json:"theme,omitempty"`
 }
 
-// WebSearchConfig selects the web-search backend. Provider is "duckduckgo"
-// (keyless, default), "brave", or "tavily"; the API-key backends read the key
-// from APIKey or the EnvKey environment variable (defaulting to the provider's
-// standard variable).
+// WebSearchConfig selects the web-search backend. Provider is one of the
+// keyless engines — "duckduckgo" (default), "baidu", "bing", "bing-cn"
+// (cn.bing.com), "yahoo" — or an API backend, "google", "brave" or "tavily",
+// which reads its key from APIKey or the EnvKey environment variable
+// (defaulting to the provider's standard variable).
 type WebSearchConfig struct {
 	Provider string `json:"provider,omitempty"`
 	APIKey   string `json:"api_key,omitempty"`
 	EnvKey   string `json:"env_key,omitempty"`
+	// EngineID is Google's Programmable Search engine identifier ("cx").
+	// Google alone needs it: the key authenticates the caller, the engine ID
+	// says what corpus is searched. Unused by every other backend.
+	EngineID string `json:"engine_id,omitempty"`
 }
 
 // PriceConfig is a model's price in USD per one million tokens.
@@ -494,6 +500,9 @@ func mergeFile(cfg *Config, path string) error {
 	if layer.WebSearch.EnvKey != "" {
 		cfg.WebSearch.EnvKey = layer.WebSearch.EnvKey
 	}
+	if layer.WebSearch.EngineID != "" {
+		cfg.WebSearch.EngineID = layer.WebSearch.EngineID
+	}
 	return nil
 }
 
@@ -509,11 +518,42 @@ func (c *Config) WebSearchKey() string {
 			return v
 		}
 	}
-	switch strings.ToLower(c.WebSearch.Provider) {
+	name, _ := webtool.CanonicalProvider(c.WebSearch.Provider)
+	switch name {
 	case "brave":
 		return os.Getenv("BRAVE_API_KEY")
 	case "tavily":
 		return os.Getenv("TAVILY_API_KEY")
+	case "google":
+		return firstEnv("GOOGLE_API_KEY", "GOOGLE_SEARCH_API_KEY")
+	}
+	return ""
+}
+
+// WebSearchEngineID resolves Google's Programmable Search engine ID ("cx")
+// from the config or the environment.
+func (c *Config) WebSearchEngineID() string {
+	if c.WebSearch.EngineID != "" {
+		return c.WebSearch.EngineID
+	}
+	return firstEnv("GOOGLE_SEARCH_ENGINE_ID", "GOOGLE_CSE_ID")
+}
+
+// WebSearchCredentials bundles what the configured backend needs to
+// authenticate, so callers do not have to know which engine needs what.
+func (c *Config) WebSearchCredentials() webtool.Credentials {
+	return webtool.Credentials{
+		APIKey:   c.WebSearchKey(),
+		EngineID: c.WebSearchEngineID(),
+	}
+}
+
+// firstEnv returns the first of the named variables that is set and non-empty.
+func firstEnv(names ...string) string {
+	for _, n := range names {
+		if v := os.Getenv(n); v != "" {
+			return v
+		}
 	}
 	return ""
 }
@@ -978,6 +1018,13 @@ var validKeys = map[string]func(string) error{
 		}
 		return nil
 	},
+	"web_search_provider": func(v string) error {
+		if _, ok := webtool.CanonicalProvider(v); !ok {
+			return fmt.Errorf("unknown search engine %q (choose one of %s)",
+				v, strings.Join(webtool.Providers(), ", "))
+		}
+		return nil
+	},
 	"thinking": func(v string) error {
 		if _, ok := provider.ParseEffort(v); !ok {
 			levels := provider.Efforts()
@@ -1008,7 +1055,7 @@ var validKeys = map[string]func(string) error{
 
 // Keys returns the settable configuration keys in display order.
 func Keys() []string {
-	return []string{"provider", "model", "api_key", "base_url", "max_turns", "permission_mode", "goal_max_rounds", "vision_provider", "vision_model", "thinking", "auto_compact", "context_limit", "bash_policy", "sandbox", "theme"}
+	return []string{"provider", "model", "api_key", "base_url", "max_turns", "permission_mode", "goal_max_rounds", "vision_provider", "vision_model", "thinking", "auto_compact", "context_limit", "bash_policy", "sandbox", "theme", "web_search_provider"}
 }
 
 // Set persists one field to the global config file (backwards-compatible
@@ -1074,6 +1121,11 @@ func SetScoped(scope Scope, projectDir, key, value string) error {
 		cfg.Sandbox = value
 	case "theme":
 		cfg.Theme = value
+	case "web_search_provider":
+		// Persist the canonical spelling, so an alias ("cn.bing.com", "百度")
+		// is not what the config file ends up documenting.
+		name, _ := webtool.CanonicalProvider(value)
+		cfg.WebSearch.Provider = name
 	}
 	return cfg.saveTo(path)
 }

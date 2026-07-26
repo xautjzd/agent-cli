@@ -10,6 +10,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/permission"
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/theme"
+	"github.com/xautjzd/agent-cli/internal/webtool"
 )
 
 // Interactive configuration, in the spirit of Claude Code's /config panel:
@@ -72,6 +73,12 @@ func (r *Repl) currentValue(key string) string {
 		return orDefault(r.Cfg.Sandbox, "off")
 	case "theme":
 		return orDefault(r.Cfg.Theme, theme.Default())
+	case "web_search_provider":
+		name, ok := webtool.CanonicalProvider(r.Cfg.WebSearch.Provider)
+		if !ok {
+			return "duckduckgo" // empty or unrecognized: what NewSearcher will use
+		}
+		return name
 	}
 	return ""
 }
@@ -323,6 +330,8 @@ func (r *Repl) applyLive(ctx context.Context, key, value string) error {
 		}
 		r.switchTheme(value)
 		return nil
+	case "web_search_provider":
+		return r.switchSearchProvider(value)
 	}
 	return fmt.Errorf("unknown config key %q (valid: %v)", key, config.Keys())
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/textwidth"
 	"github.com/xautjzd/agent-cli/internal/theme"
+	"github.com/xautjzd/agent-cli/internal/webtool"
 )
 
 // settingKind decides how a row is edited.
@@ -53,6 +54,7 @@ var configSettings = []setting{
 	{"goal_max_rounds", "Goal check rounds", kindInt, nil},
 	{"vision_provider", "Vision fallback provider", kindText, nil},
 	{"vision_model", "Vision fallback model", kindText, nil},
+	{"web_search_provider", "Web search engine", kindEnum, webtool.Providers()},
 	{"theme", "Color theme", kindEnum, theme.Names()},
 }
 
