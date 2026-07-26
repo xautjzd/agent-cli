@@ -60,6 +60,17 @@ var prices = map[string]Price{
 	// DeepSeek (approximate, cache-miss rate).
 	"deepseek-v4-flash": {0.14, 0.28},
 	"deepseek-v4-pro":   {0.435, 0.87},
+	// Google Gemini (ai.google.dev/gemini-api/docs/pricing, paid tier, the
+	// text/image/video input rate; audio input and the > 200k tier cost more
+	// and are not modeled here).
+	"gemini-3.6-flash":       {1.5, 7.5},
+	"gemini-3.5-flash":       {1.5, 9},
+	"gemini-3.5-flash-lite":  {0.3, 2.5},
+	"gemini-3.1-pro-preview": {2, 12},
+	"gemini-3.1-flash-lite":  {0.25, 1.5},
+	"gemini-2.5-pro":         {1.25, 10},
+	"gemini-2.5-flash":       {0.3, 2.5},
+	"gemini-2.5-flash-lite":  {0.1, 0.4},
 	// xAI (docs.x.ai/developers/pricing, the < 200k prompt-token tier; the
 	// long-context tier is double and is not modeled here).
 	"grok-4.5":                     {2, 6},

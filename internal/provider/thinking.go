@@ -19,7 +19,8 @@ import (
 // docs.bigmodel.cn/cn/guide/start/concept-param,
 // platform.kimi.com/docs/guide/use-thinking-models,
 // developers.openai.com/api/docs/guides/reasoning,
-// docs.x.ai/developers/model-capabilities/text/reasoning.
+// docs.x.ai/developers/model-capabilities/text/reasoning,
+// ai.google.dev/gemini-api/docs/thinking and .../docs/openai.
 
 // disableStyle is how "no thinking" is spelled on an OpenAI-compatible wire.
 type disableStyle int
@@ -170,6 +171,18 @@ func SupportedThinking(model string) ThinkingSupport {
 		return ThinkingSupport{
 			Thinks: true, CanDisable: true, disable: disableEffortNone,
 			Levels: []Effort{EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
+		}
+
+	case strings.HasPrefix(m, "gemini"):
+		// Over the OpenAI-compatible surface every Gemini model takes
+		// minimal/low/medium/high, which Google maps onto each model's own
+		// thinking_level or budget (a model without "minimal" receives "low").
+		// No value turns thinking off, and thinking_level/thinking_budget must
+		// not be combined with reasoning_effort — so the effort ladder is the
+		// only control used here.
+		return ThinkingSupport{
+			Thinks: true, disable: disableUnsupported,
+			Levels: []Effort{EffortMinimal, EffortLow, EffortMedium, EffortHigh},
 		}
 
 	case strings.HasPrefix(m, "grok"):

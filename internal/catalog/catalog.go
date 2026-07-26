@@ -150,6 +150,30 @@ var presets = []Provider{
 		Notes:         "platform.kimi.com",
 	},
 	{
+		Name: "google",
+		// Gemini is the model family, Google the vendor — same split as
+		// GLM/Z.AI, so the family name stays valid as an alias.
+		Aliases: []string{"gemini", "googleai", "aistudio"},
+		Label:   "Google (Gemini)",
+		// The OpenAI-compatible surface of the Gemini API; the native
+		// generateContent API is not spoken here.
+		BaseURL:      "https://generativelanguage.googleapis.com/v1beta/openai",
+		Format:       provider.FormatOpenAI,
+		EnvKeys:      []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+		DefaultModel: "gemini-3.6-flash",
+		Models: []string{
+			"gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite",
+			"gemini-3.1-pro-preview", "gemini-3.1-flash-lite",
+			"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+		},
+		// 1M is the documented window for the 2.5 line; ai.google.dev does not
+		// restate it per model for the 3.x line, so this is the family default
+		// rather than a per-model fact.
+		ContextWindow: 1_000_000,
+		Vision:        true,
+		Notes:         "aistudio.google.com/apikey",
+	},
+	{
 		Name:    "xai",
 		Aliases: []string{"grok", "x.ai"},
 		Label:   "xAI (Grok)",

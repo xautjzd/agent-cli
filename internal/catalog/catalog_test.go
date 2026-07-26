@@ -163,7 +163,7 @@ func TestNamesAndModels(t *testing.T) {
 
 func TestCatalogCoversRequestedVendors(t *testing.T) {
 	// The vendors this CLI is expected to configure out of the box.
-	for _, want := range []string{"openai", "anthropic", "deepseek", "zai", "glm", "kimi", "dashscope", "xai", "grok"} {
+	for _, want := range []string{"openai", "anthropic", "deepseek", "zai", "glm", "kimi", "dashscope", "xai", "grok", "google", "gemini"} {
 		if _, ok := Lookup(want); !ok {
 			t.Errorf("catalog is missing %q", want)
 		}
