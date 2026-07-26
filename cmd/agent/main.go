@@ -38,6 +38,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/hook"
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/lsp"
 	"github.com/xautjzd/agent-cli/internal/mcp"
 	"github.com/xautjzd/agent-cli/internal/mdstream"
@@ -228,6 +229,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	log.Debug("main", "config loaded: provider=%s model=%s", cfg.Provider, cfg.Model)
 	if *providerFlag != "" {
 		// LoadFor re-targets the whole configuration at the requested
 		// vendor — default model, endpoint and credentials — instead of
@@ -256,6 +258,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	log.Info("main", "startup: agent-cli %s, workDir=%s, provider=%s, model=%s", version.Version, workDir, cfg.Provider, cfg.Model)
 	sess, err := buildSession(cfg, workDir, *prompt == "")
 	if sess != nil {
 		// Terminate MCP child processes and connections on exit.
@@ -293,6 +296,7 @@ func run(args []string) error {
 //	echo "summarize @CHANGELOG.md" | agent -p -
 //	agent -p "audit @config.go" -output json | jq .result
 func runNonInteractive(ctx context.Context, sess *repl.Repl, cfg *config.Config, prompt, format string, quiet, bypass bool) error {
+	log.Info("main", "non-interactive: provider=%s model=%s format=%s", cfg.Provider, cfg.Model, format)
 	// Resolve the prompt: "-" reads it entirely from stdin; a normal prompt
 	// with piped stdin appends that stdin as context (e.g. a diff).
 	text := prompt
@@ -363,6 +367,17 @@ func round2(f float64) float64 { return float64(int64(f*100+0.5)) / 100 }
 // isTTY reports whether f is an interactive terminal.
 func isTTY(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 
+// countOK counts how many MCP server statuses report a successful connection.
+func countOK(statuses []mcp.ServerStatus) int {
+	n := 0
+	for _, s := range statuses {
+		if s.OK() {
+			n++
+		}
+	}
+	return n
+}
+
 // ciSink renders agent activity for non-interactive runs: the final answer goes
 // to stdout (so it is cleanly pipeable), tool activity to stderr (so it stays
 // out of the captured result), and nothing at all in quiet mode. In JSON mode
@@ -428,8 +443,10 @@ func buildSession(cfg *config.Config, workDir string, interactive bool) (*repl.R
 			return nil, err
 		}
 		if cfg.Provider == "" {
+			log.Warn("main", "no provider configured — run /provider to pick one")
 			fmt.Fprintln(os.Stderr, "No provider configured yet — run /provider to pick one (it prompts for the API key and saves it).")
 		} else {
+			log.Warn("main", "provider %s build failed: %v", cfg.Provider, err)
 			fmt.Fprintf(os.Stderr, "warning: %v\n         set one with /provider %s, or export the variable and restart.\n",
 				err, cfg.Provider)
 		}
@@ -450,6 +467,7 @@ func buildSession(cfg *config.Config, workDir string, interactive bool) (*repl.R
 	// available.
 	sbox := sandbox.New(sandbox.Options{Mode: cfg.Sandbox, DenyNetwork: cfg.SandboxDenyNetwork})
 	if cfg.Sandbox == "on" && !sbox.Available() {
+		log.Warn("main", "sandbox requested but unavailable: %s", sbox.Reason())
 		fmt.Fprintf(os.Stderr, "warning: sandbox requested but unavailable — %s\n", sbox.Reason())
 	}
 
@@ -528,9 +546,11 @@ func buildSession(cfg *config.Config, workDir string, interactive bool) (*repl.R
 	mcpMgr := mcp.Connect(context.Background(), cfg.MCPServers, registry)
 	for _, s := range mcpMgr.Status {
 		if !s.OK() {
+			log.Warn("main", "MCP server %q failed: %v", s.Name, s.Err)
 			fmt.Fprintf(os.Stderr, "warning: MCP server %q failed: %v\n", s.Name, s.Err)
 		}
 	}
+	log.Info("main", "session wired: %d tools, %d MCP servers connected", len(registry.All()), countOK(mcpMgr.Status))
 
 	// Enable deferred tool loading when tools were actually deferred (MCP tools
 	// present) and it is not disabled. The search_tools meta-tool is a core tool
@@ -629,6 +649,7 @@ func buildHooks(cfg *config.Config) *hook.Runner {
 	}
 	runner, errs := hook.New(hooks)
 	for _, err := range errs {
+		log.Warn("main", "invalid hook: %v", err)
 		fmt.Fprintf(os.Stderr, "warning: invalid hook: %v\n", err)
 	}
 	return runner
@@ -653,6 +674,7 @@ func buildPolicy(cfg *config.Config, workDir string) *permission.Policy {
 	}
 	pol, errs := permission.NewPolicy(posture, rules)
 	for _, err := range errs {
+		log.Warn("main", "invalid permission rule: %v", err)
 		fmt.Fprintf(os.Stderr, "warning: invalid permission rule: %v\n", err)
 	}
 	return pol

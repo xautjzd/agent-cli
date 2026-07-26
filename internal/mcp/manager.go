@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/xautjzd/agent-cli/internal/config"
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/tool"
 )
 
@@ -51,14 +52,17 @@ func Connect(ctx context.Context, servers map[string]config.MCPServerConfig, reg
 		if cfg.Disabled {
 			continue
 		}
+		log.Info("mcp", "connecting to %q via %s", name, cfg.Transport())
 		st := ServerStatus{Name: name, Transport: cfg.Transport()}
 		client, tools, err := dial(ctx, name, cfg)
 		if err != nil {
+			log.Warn("mcp", "server %q failed: %v", name, err)
 			st.Err = err
 			m.Status = append(m.Status, st)
 			continue
 		}
 		m.clients = append(m.clients, client)
+		log.Debug("mcp", "server %q connected, %d tools", name, len(tools))
 		for _, info := range tools {
 			a := &toolAdapter{client: client, info: info, name: ToolName(name, info.Name)}
 			// MCP tools are loaded on demand: their full JSON Schema can be large

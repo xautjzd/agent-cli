@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/permission"
 	"github.com/xautjzd/agent-cli/internal/theme"
 )
@@ -22,6 +23,7 @@ import (
 func (r *Repl) BeforeToolCall(name, args string) (bool, string) {
 	policy := r.policyOrDefault()
 	decision := policy.Evaluate(name, json.RawMessage(args), r.WorkDir)
+	log.Debug("repl", "gate: tool=%s action=%s dangerous=%t", name, decision.Action, decision.Dangerous)
 
 	// A clean allow with no risk passes untouched and unlogged.
 	if decision.Action == permission.ActionAllow && !decision.Dangerous {

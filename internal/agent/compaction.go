@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/provider"
 )
 
@@ -89,9 +90,11 @@ func (a *Agent) maybeCompact(ctx context.Context) {
 	if !a.shouldCompact() {
 		return
 	}
+	log.Info("agent", "compaction: auto-triggering, context=%d tokens, limit=%d", a.contextTokens, a.ContextLimit)
 	if _, err := a.compact(ctx, "auto"); err != nil {
 		// Surface nothing fatal: the next turn simply carries full history
 		// and may retry. Compaction must never break the loop.
+		log.Warn("agent", "compaction: auto failed: %v", err)
 		return
 	}
 }
@@ -107,6 +110,7 @@ func (a *Agent) Compact(ctx context.Context) (CompactionStats, error) {
 // tail...]. split is chosen at a user-turn boundary so no tool result is
 // orphaned from the assistant tool call it answers.
 func (a *Agent) compact(ctx context.Context, trigger string) (CompactionStats, error) {
+	log.Debug("agent", "compact: trigger=%s, messages=%d", trigger, len(a.messages))
 	if len(a.messages) < 3 {
 		return CompactionStats{}, fmt.Errorf("conversation too short to compact")
 	}
@@ -155,6 +159,8 @@ func (a *Agent) compact(ctx context.Context, trigger string) (CompactionStats, e
 	a.contextTokens = 0
 
 	stats.MessagesAfter = len(a.messages)
+	log.Info("agent", "compaction: %s done, %d→%d messages, %d summarized, %d summary chars",
+		trigger, stats.MessagesBefore, stats.MessagesAfter, stats.SummarizedMessages, stats.SummaryChars)
 	// Auto compaction has no command to report it, so notify the UI via the
 	// observer. Manual /compact is reported by its command handler instead,
 	// keeping each path to a single message.

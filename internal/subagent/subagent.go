@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/xautjzd/agent-cli/internal/agent"
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/tool"
 	"github.com/xautjzd/agent-cli/internal/usage"
@@ -123,11 +124,13 @@ func (s *Spawner) Types() []Definition {
 // system prompt and a Task-free tool set.
 func (s *Spawner) Run(ctx context.Context, typeName, taskPrompt string) (string, error) {
 	def := s.definition(typeName)
+	log.Info("subagent", "spawned: type=%s, prompt=%d chars", def.Name, len(taskPrompt))
 
 	reg := tool.NewRegistry()
 	for _, t := range s.buildToolsFor(def) {
 		reg.Register(t)
 	}
+	log.Debug("subagent", "tools built: %d", len(reg.All()))
 
 	var events agent.Events
 	if s.NewEvents != nil {
@@ -148,8 +151,10 @@ func (s *Spawner) Run(ctx context.Context, typeName, taskPrompt string) (string,
 
 	out, err := child.Run(ctx, taskPrompt)
 	if err != nil {
+		log.Warn("subagent", "type=%s failed: %v", def.Name, err)
 		return "", err
 	}
+	log.Info("subagent", "type=%s completed, %d chars report", def.Name, len(out))
 	return strings.TrimSpace(out), nil
 }
 

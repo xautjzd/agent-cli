@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+
+	"github.com/xautjzd/agent-cli/internal/log"
 )
 
 // This file is the Anthropic Messages API adapter. It is the only place in
@@ -110,14 +113,18 @@ func (p *anthropicProvider) Name() string { return p.name }
 
 // Chat performs one blocking Messages API round-trip.
 func (p *anthropicProvider) Chat(ctx context.Context, req Request) (*Response, error) {
+	log.Debug("provider", "%s Chat: model=%s, %d messages, %d tools", p.name, req.Model, len(req.Messages), len(req.Tools))
+	start := time.Now()
 	params, err := p.buildParams(req, defaultAnthropicMaxTokens)
 	if err != nil {
 		return nil, err
 	}
 	msg, err := p.client.Messages.New(ctx, *params)
 	if err != nil {
+		log.Warn("provider", "%s Chat: API error: %v", p.name, err)
 		return nil, p.wrapError(err)
 	}
+	log.Debug("provider", "%s Chat: done in %s", p.name, time.Since(start).Round(time.Millisecond))
 	return fromAnthropicMessage(msg)
 }
 
@@ -126,6 +133,8 @@ func (p *anthropicProvider) Chat(ctx context.Context, req Request) (*Response, e
 // identical to the blocking path while text and thinking fragments are
 // forwarded live.
 func (p *anthropicProvider) ChatStream(ctx context.Context, req Request, onDelta func(Delta)) (*Response, error) {
+	log.Debug("provider", "%s ChatStream: model=%s, %d messages, %d tools", p.name, req.Model, len(req.Messages), len(req.Tools))
+	start := time.Now()
 	params, err := p.buildParams(req, defaultAnthropicStreamMaxTokens)
 	if err != nil {
 		return nil, err
@@ -158,6 +167,7 @@ func (p *anthropicProvider) ChatStream(ctx context.Context, req Request, onDelta
 				return resp, ctx.Err()
 			}
 		}
+		log.Warn("provider", "%s ChatStream: stream error: %v", p.name, err)
 		return nil, p.wrapError(err)
 	}
 	// A stream that yielded nothing at all means the endpoint answered
@@ -165,9 +175,11 @@ func (p *anthropicProvider) ChatStream(ctx context.Context, req Request, onDelta
 	// compatible gateways that only implement the blocking API. Report it
 	// instead of returning a silently empty answer.
 	if acc.StopReason == "" && len(acc.Content) == 0 {
+		log.Warn("provider", "%s ChatStream: no stream events", p.name)
 		return nil, fmt.Errorf("%s: endpoint returned no stream events "+
 			"(it may not support streaming; check its base_url and API compatibility)", p.name)
 	}
+	log.Debug("provider", "%s ChatStream: done in %s", p.name, time.Since(start).Round(time.Millisecond))
 	return fromAnthropicMessage(&acc)
 }
 

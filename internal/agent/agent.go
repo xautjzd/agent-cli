@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/tool"
 	"github.com/xautjzd/agent-cli/internal/usage"
@@ -198,10 +199,13 @@ func (a *Agent) RunMessage(ctx context.Context, userMsg provider.Message) (strin
 	userMsg.Role = provider.RoleUser
 	a.messages = append(a.messages, userMsg)
 
+	log.Info("agent", "Run: started, %d messages in history", len(a.messages))
+
 	start := time.Now()
 	var stats TurnStats
 
 	for turn := 0; turn < a.MaxTurns; turn++ {
+		log.Debug("agent", "complete: turn %d, %d messages, %d tools", turn, len(a.messages), len(a.toolDefs()))
 		resp, streamed, err := a.complete(ctx, provider.Request{
 			Model:    a.Model,
 			Messages: a.requestMessages(),
@@ -244,6 +248,7 @@ func (a *Agent) RunMessage(ctx context.Context, userMsg provider.Message) (strin
 		}
 
 		if len(resp.Message.ToolCalls) == 0 {
+			log.Info("agent", "Run: final answer in %d rounds, %d+%d tokens", stats.Rounds, stats.PromptTokens, stats.CompletionTokens)
 			a.finishTurn(&stats, start)
 			// Compact after the turn completes so the next user message
 			// starts from a smaller context. Done here (not mid-loop) to
@@ -253,6 +258,7 @@ func (a *Agent) RunMessage(ctx context.Context, userMsg provider.Message) (strin
 		}
 
 		a.executeToolCalls(ctx, resp.Message.ToolCalls)
+		log.Debug("agent", "executed %d tool calls in turn %d", len(resp.Message.ToolCalls), turn)
 	}
 	return "", fmt.Errorf("reached max turns (%d) without a final answer", a.MaxTurns)
 }
@@ -385,6 +391,7 @@ func (a *Agent) runOneToolCall(ctx context.Context, call provider.ToolCall) tool
 // execution and reports the reason instead.
 func (a *Agent) executeWithHooks(ctx context.Context, call provider.ToolCall, note string) toolOutcome {
 	name, args := call.Function.Name, call.Function.Arguments
+	log.Debug("agent", "executeWithHooks: tool=%s args_len=%d", name, len(args))
 
 	if a.Hooks != nil {
 		if h := a.Hooks.PreToolUse(ctx, name, args); h.Block {
@@ -480,9 +487,14 @@ func (a *Agent) complete(ctx context.Context, req provider.Request) (*provider.R
 	streamer, canStream := a.Provider.(provider.Streamer)
 	sink, canRender := a.Events.(StreamEvents)
 	if !canStream || !canRender {
+		log.Debug("agent", "complete: blocking Chat, provider=%s, model=%s", a.Provider.Name(), req.Model)
 		resp, err := a.Provider.Chat(ctx, req)
+		if err != nil {
+			log.Warn("agent", "complete: Chat failed: %v", err)
+		}
 		return resp, false, err
 	}
+	log.Debug("agent", "complete: streaming ChatStream, provider=%s, model=%s", a.Provider.Name(), req.Model)
 	resp, err := streamer.ChatStream(ctx, req, func(d provider.Delta) {
 		if d.Reasoning != "" {
 			sink.OnThinkingDelta(d.Reasoning)

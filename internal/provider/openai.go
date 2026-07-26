@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/xautjzd/agent-cli/internal/log"
 )
 
 // openAICompatible implements Provider against the OpenAI Chat Completions
@@ -193,6 +195,8 @@ func applyThinking(wire *chatRequest, effort Effort, model string) {
 // Request into OpenAI wire format, POST it, then normalize the first choice
 // back into a Response the agent loop can act on.
 func (p *openAICompatible) Chat(ctx context.Context, req Request) (*Response, error) {
+	log.Debug("provider", "%s Chat: model=%s, %d messages, %d tools", p.name, req.Model, len(req.Messages), len(req.Tools))
+	start := time.Now()
 	wire := chatRequest{
 		Model:     req.Model,
 		Messages:  toWireMessages(req.Messages),
@@ -236,14 +240,18 @@ func (p *openAICompatible) Chat(ctx context.Context, req Request) (*Response, er
 		return nil, fmt.Errorf("%s API error: %s", p.name, parsed.Error.Message)
 	}
 	if httpResp.StatusCode != http.StatusOK {
+		log.Warn("provider", "%s Chat: HTTP %d, body=%d bytes", p.name, httpResp.StatusCode, len(respBody))
 		return nil, fmt.Errorf("%s: HTTP %d: %s", p.name, httpResp.StatusCode,
 			truncate(string(respBody), 500))
 	}
 	if len(parsed.Choices) == 0 {
+		log.Warn("provider", "%s Chat: no choices in response", p.name)
 		return nil, fmt.Errorf("%s: response contained no choices", p.name)
 	}
 
 	choice := parsed.Choices[0]
+	log.Debug("provider", "%s Chat: done in %s, prompt=%d completion=%d tokens",
+		p.name, time.Since(start).Round(time.Millisecond), parsed.Usage.PromptTokens, parsed.Usage.CompletionTokens)
 	return &Response{
 		Message:      choice.Message,
 		FinishReason: choice.FinishReason,
@@ -284,6 +292,8 @@ type streamChunk struct {
 // pieces); the final usage chunk is captured. The assembled Response is
 // indistinguishable from a blocking Chat result.
 func (p *openAICompatible) ChatStream(ctx context.Context, req Request, onDelta func(Delta)) (*Response, error) {
+	log.Debug("provider", "%s ChatStream: model=%s, %d messages, %d tools", p.name, req.Model, len(req.Messages), len(req.Tools))
+	start := time.Now()
 	wire := chatRequest{
 		Model:         req.Model,
 		Messages:      toWireMessages(req.Messages),
@@ -394,6 +404,7 @@ func (p *openAICompatible) ChatStream(ctx context.Context, req Request, onDelta 
 		if ctx.Err() != nil {
 			return partial, ctx.Err()
 		}
+		log.Warn("provider", "%s ChatStream: stream read error: %v", p.name, err)
 		return nil, fmt.Errorf("%s: stream read: %w", p.name, err)
 	}
 	// The scanner can also stop cleanly (no error) when the context is
@@ -401,6 +412,8 @@ func (p *openAICompatible) ChatStream(ctx context.Context, req Request, onDelta 
 	if ctx.Err() != nil {
 		return partial, ctx.Err()
 	}
+	log.Debug("provider", "%s ChatStream: done in %s, %d chars, %d tool calls, prompt=%d completion=%d tokens",
+		p.name, time.Since(start).Round(time.Millisecond), content.Len(), len(calls), usage.PromptTokens, usage.CompletionTokens)
 	return partial, nil
 }
 

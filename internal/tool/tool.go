@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+
+	"github.com/xautjzd/agent-cli/internal/log"
 )
 
 // Tool is one capability the model may invoke.
@@ -122,12 +124,16 @@ func (r *Registry) Names() []string {
 func (r *Registry) Execute(ctx context.Context, name string, input json.RawMessage) (string, bool) {
 	t, ok := r.Get(name)
 	if !ok {
+		log.Warn("tool", "unknown tool %q (available: %v)", name, r.Names())
 		return fmt.Sprintf("Error: unknown tool %q. Available tools: %v", name, r.Names()), false
 	}
+	log.Debug("tool", "Execute: %s, args=%d bytes", name, len(input))
 	out, err := t.Execute(ctx, input)
 	if err != nil {
+		log.Warn("tool", "%s failed: %v", name, err)
 		return "Error: " + err.Error(), false
 	}
+	log.Debug("tool", "%s done, %d bytes output, ok=true", name, len(out))
 	if out == "" {
 		return "(no output)", true
 	}

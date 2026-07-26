@@ -27,6 +27,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/hook"
 	"github.com/xautjzd/agent-cli/internal/lsp"
 	"github.com/xautjzd/agent-cli/internal/mcp"
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/permission"
 
@@ -275,10 +276,13 @@ func (r *Repl) handleLine(ctx context.Context, input string) (done bool) {
 	if input == "" {
 		return false
 	}
+	log.Debug("repl", "handleLine: %s", truncInput(input, 80))
 	var err error
 	if strings.HasPrefix(input, "/") {
+		log.Info("repl", "command: %s", input)
 		err = r.dispatch(ctx, input)
 	} else {
+		log.Debug("repl", "prompt: %d chars", len(input))
 		err = r.runPrompt(ctx, input)
 	}
 	switch {
@@ -1809,3 +1813,13 @@ func plural(n int) string {
 }
 
 func (r *Repl) cmdExit(_ context.Context, _ string) error { return errExit }
+
+// truncInput truncates an input string to max chars for log lines, replacing
+// newlines so a single-line log stays readable.
+func truncInput(s string, max int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > max {
+		return s[:max] + "…"
+	}
+	return s
+}

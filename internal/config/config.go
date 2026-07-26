@@ -18,6 +18,7 @@ import (
 
 	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/home"
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/theme"
 	"github.com/xautjzd/agent-cli/internal/webtool"
@@ -366,6 +367,7 @@ func LoadIn(projectDir string) (*Config, error) {
 	if cfg.Theme == "" {
 		cfg.Theme = theme.Default()
 	}
+	log.Debug("config", "LoadIn: provider=%s model=%s context_limit=%d", cfg.Provider, cfg.Model, cfg.ContextLimit)
 	return cfg, nil
 }
 

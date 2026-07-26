@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/version"
 )
 
@@ -82,6 +83,7 @@ func (c *Client) Name() string { return c.name }
 // initialize performs the MCP handshake: the initialize request followed by
 // the notifications/initialized acknowledgement the spec requires.
 func (c *Client) initialize(ctx context.Context) error {
+	log.Debug("mcp", "%s: initialize handshake", c.name)
 	params := map[string]any{
 		"protocolVersion": protocolVersion,
 		"capabilities":    map[string]any{},
@@ -121,6 +123,7 @@ func (c *Client) ListTools(ctx context.Context) ([]ToolInfo, error) {
 // tool-level error (isError) and transport errors are surfaced to the caller;
 // the tool adapter decides how to present them to the model.
 func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage) (string, error) {
+	log.Debug("mcp", "%s: CallTool %s, args=%d bytes", c.name, name, len(args))
 	params := map[string]any{"name": name}
 	if len(args) > 0 {
 		params["arguments"] = json.RawMessage(args)

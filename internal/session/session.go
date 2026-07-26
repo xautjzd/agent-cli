@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/xautjzd/agent-cli/internal/home"
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/textwidth"
 )
@@ -231,6 +232,7 @@ func (s *FileStore) Save(sess *Session) error {
 	if err != nil {
 		return err
 	}
+	log.Debug("session", "Save: id=%s, %d messages", sess.ID, sess.MessageCount)
 	return os.WriteFile(s.path(sess.ID), append(data, '\n'), 0o644)
 }
 
@@ -274,6 +276,7 @@ func (s *FileStore) Load(id string) (*Session, error) {
 	if err := json.Unmarshal(data, &sess); err != nil {
 		return nil, fmt.Errorf("session %q is corrupt: %w", id, err)
 	}
+	log.Debug("session", "Load: id=%s, %d messages", sess.ID, sess.MessageCount)
 	return &sess, nil
 }
 
