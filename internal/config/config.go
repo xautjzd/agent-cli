@@ -640,6 +640,48 @@ func applyPreset(cfg *Config) {
 	}
 }
 
+// SaveProviderChoice persists a resolved provider switch to the global config
+// so it survives a restart. It writes the canonical provider name (an alias or
+// a legacy "<vendor>-anthropic" spelling is normalized on the way in), the wire
+// that switch selected, and reconciles the top-level base_url: a value the
+// provider supplies itself is cleared, because a stale endpoint from the
+// previous provider would otherwise shadow the profile/preset one on the next
+// load (applyPreset only fills base_url when it is empty). The model is stored
+// only when the caller named one explicitly — otherwise the profile or preset
+// supplies its own on reload, and a pinned model would just go stale.
+func SaveProviderChoice(cfg *Config, model string) error {
+	if err := SetScoped(ScopeGlobal, "", "provider", cfg.Provider); err != nil {
+		return err
+	}
+	if err := SetScoped(ScopeGlobal, "", "format", cfg.Format); err != nil {
+		return err
+	}
+	baseURL := cfg.BaseURL
+	if cfg.providerOwnsBaseURL() {
+		baseURL = ""
+	}
+	if err := SetScoped(ScopeGlobal, "", "base_url", baseURL); err != nil {
+		return err
+	}
+	if model == "" {
+		return nil
+	}
+	return SetScoped(ScopeGlobal, "", "model", model)
+}
+
+// providerOwnsBaseURL reports whether the active provider supplies its own
+// endpoint — via a user profile or a built-in catalog preset — so the
+// top-level base_url can be dropped rather than pinned to the resolved value.
+func (c *Config) providerOwnsBaseURL() bool {
+	if p, ok := c.Providers[c.Provider]; ok && p.BaseURL != "" {
+		return true
+	}
+	if p, ok := catalog.Lookup(c.Provider); ok && p.BaseURL != "" {
+		return true
+	}
+	return false
+}
+
 // IsNamedProfile reports whether name refers to a providers-map entry
 // rather than a built-in vendor.
 func (c *Config) IsNamedProfile(name string) bool {

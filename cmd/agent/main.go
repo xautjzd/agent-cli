@@ -4,16 +4,22 @@
 //
 //	agent                       start an interactive session
 //	agent -p "prompt"           run one prompt and exit
+//	agent config show|init|set <key> <value> [project]
+//	agent provider list|use <name> [model] [--anthropic|--openai]
+//	agent session list|show|rename|delete ...
 //	agent skill list|install|remove|show ...
 //	agent memory list|show|delete ...
-//	agent session list|show|rename|delete ...
-//	agent config [init|show]
+//	agent version
+//
+// "agent -h" prints the same list (see printUsage) plus every flag, and
+// "agent <command> -h" explains a single command.
 package main
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -25,6 +31,7 @@ import (
 	"time"
 
 	"github.com/xautjzd/agent-cli/internal/agent"
+	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/checkpoint"
 	"github.com/xautjzd/agent-cli/internal/command"
 	"github.com/xautjzd/agent-cli/internal/config"
@@ -58,6 +65,114 @@ func main() {
 	}
 }
 
+// subcommand documents one command dispatched before flag parsing. Grammar is
+// the one-liner "agent -h" shows; actions are the individual forms that
+// "agent <name> -h" explains.
+type subcommand struct {
+	name    string
+	grammar string
+	actions [][2]string
+}
+
+// subcommands is the single source of truth for both help levels: a command
+// added to the switch in run() must be listed here or it stays invisible to
+// "agent -h" (TestUsageCoversEverySubcommandAndFlag enforces this).
+var subcommands = []subcommand{
+	{"config", "show | init | set <key> <value> [project]", [][2]string{
+		{"show", "print the resolved configuration and where it came from"},
+		{"init", "write a starter global config file"},
+		{"set <key> <value> [project]", "set one key globally, or in this project's config"},
+	}},
+	{"provider", "list | use <name> [model] [--anthropic|--openai]", [][2]string{
+		{"list", "list config profiles and built-in presets, with credential status"},
+		{"use <name> [model]", "persist a provider (and model) as the default"},
+		{"  --anthropic / --openai", "pick the wire for a vendor that serves both"},
+	}},
+	{"session", "list | show <id> | rename <id> <title> | delete <id>", [][2]string{
+		{"list", "list this project's recorded sessions"},
+		{"show <id>", "print a full transcript, including tool calls and results"},
+		{"rename <id> <title>", "retitle a session (quoting optional)"},
+		{"delete <id>", "delete a session"},
+	}},
+	{"skill", "list | install <dir-or-git-url> | show <name> | remove <name>", [][2]string{
+		{"list", "list installed skills"},
+		{"install <dir-or-git-url>", "install a skill from a directory or git repository"},
+		{"show <name>", "print a skill's metadata and body"},
+		{"remove <name>", "uninstall a skill"},
+	}},
+	{"memory", "list | show <name> | delete <name>", [][2]string{
+		{"list", "list this project's saved memories"},
+		{"show <name>", "print one memory"},
+		{"delete <name>", "delete one memory"},
+	}},
+	{"version", "print the version and exit", nil},
+}
+
+// helpRequested reports whether a subcommand's arguments ask for its help
+// rather than an action, so every command answers "-h" the way the top level
+// does instead of rejecting it as an unknown action.
+func helpRequested(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "-h", "--help", "help":
+		return true
+	}
+	return false
+}
+
+// printSubcommandUsage prints the help for one subcommand: its grammar and
+// every action it accepts.
+func printSubcommandUsage(w io.Writer, name string) {
+	for _, c := range subcommands {
+		if c.name != name {
+			continue
+		}
+		// A command with no actions (version) has no grammar to spell out, so
+		// its one-liner becomes the description instead of a usage suffix.
+		if len(c.actions) == 0 {
+			fmt.Fprintf(w, "Usage: agent %s\n\n  %s\n", c.name, c.grammar)
+			return
+		}
+		fmt.Fprintf(w, "Usage: agent %s %s\n\n", c.name, c.grammar)
+		width := 0
+		for _, a := range c.actions {
+			if len(a[0]) > width {
+				width = len(a[0])
+			}
+		}
+		for _, a := range c.actions {
+			fmt.Fprintf(w, "  %-*s  %s\n", width, a[0], a[1])
+		}
+		return
+	}
+}
+
+// printUsage renders the full help: invocation forms, subcommands, then the
+// flags. Go's default usage prints flags only, which hid every subcommand.
+// Everything goes to the flag set's own output so the sections cannot end up
+// split across two streams (PrintDefaults always writes there).
+func printUsage(fs *flag.FlagSet) {
+	w := fs.Output()
+	fmt.Fprint(w, `agent — an agentic coding CLI
+
+Usage:
+  agent [flags]                    start an interactive session
+  agent -p "<prompt>" [flags]      run one prompt, print the answer, exit
+  agent <command> [args]           run a command (no flags; see below)
+
+Commands:
+`)
+	for _, c := range subcommands {
+		fmt.Fprintf(w, "  %-9s %s\n", c.name, c.grammar)
+	}
+	fmt.Fprint(w, "\n\"agent <command> -h\" explains one command.\n")
+	fmt.Fprint(w, "\nFlags:\n")
+	fs.PrintDefaults()
+	fmt.Fprintf(w, "\nConfig keys for \"agent config set\":\n  %s\n", strings.Join(config.Keys(), ", "))
+}
+
 func run(args []string) error {
 	// Subcommand dispatch happens before flag parsing so subcommands can
 	// define their own flags.
@@ -71,21 +186,35 @@ func run(args []string) error {
 			return runSession(args[1:])
 		case "config":
 			return runConfig(args[1:])
+		case "provider":
+			return runProvider(args[1:])
 		case "version":
+			if helpRequested(args[1:]) {
+				printSubcommandUsage(os.Stdout, "version")
+				return nil
+			}
 			fmt.Println("agent-cli " + version.Version)
 			return nil
 		}
 	}
 
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
+	fs.Usage = func() { printUsage(fs) }
 	prompt := fs.String("p", "", "run a single prompt non-interactively and exit (\"-\" reads the prompt from stdin)")
-	providerFlag := fs.String("provider", "", "override provider (anthropic, openai, deepseek, custom)")
+	// The preset names come from the catalog so this line cannot drift as
+	// vendors are added or renamed.
+	providerFlag := fs.String("provider", "", "override provider: a config profile or a preset ("+strings.Join(catalog.Names(), ", ")+")")
 	formatFlag := fs.String("format", "", "wire format for vendors serving both: openai (default) or anthropic")
 	modelFlag := fs.String("model", "", "override model")
 	bypass := fs.Bool("bypass", false, "permission bypass mode: no confirmations, dangerous operations are audit-logged")
 	output := fs.String("output", "text", "non-interactive output format: text or json")
 	quiet := fs.Bool("q", false, "non-interactive: print only the final answer (suppress tool activity)")
 	if err := fs.Parse(args); err != nil {
+		// "-h" is a request, not a failure: flag has already printed the
+		// usage, so exit cleanly instead of appending an "error:" line.
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 
@@ -793,8 +922,9 @@ func truncateOneLine(s string, max int) string {
 // --- skill subcommand -------------------------------------------------------
 
 func runSkill(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: agent skill <list|install|remove|show> [args]")
+	if len(args) == 0 || helpRequested(args) {
+		printSubcommandUsage(os.Stdout, "skill")
+		return nil
 	}
 	workDir, _ := os.Getwd()
 	repo := &skill.FSRepository{Roots: skill.DefaultRoots(workDir)}
@@ -850,14 +980,15 @@ func runSkill(args []string) error {
 		fmt.Printf("name: %s\ndescription: %s\ndirectory: %s\n\n%s\n", s.Name, s.Description, s.Dir, s.Body)
 		return nil
 	}
-	return fmt.Errorf("unknown skill command %q", args[0])
+	return fmt.Errorf("unknown skill command %q (try: agent skill -h)", args[0])
 }
 
 // --- memory subcommand ------------------------------------------------------
 
 func runMemory(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: agent memory <list|show|delete> [args]")
+	if len(args) == 0 || helpRequested(args) {
+		printSubcommandUsage(os.Stdout, "memory")
+		return nil
 	}
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -902,7 +1033,7 @@ func runMemory(args []string) error {
 		fmt.Printf("Deleted %s\n", args[1])
 		return nil
 	}
-	return fmt.Errorf("unknown memory command %q", args[0])
+	return fmt.Errorf("unknown memory command %q (try: agent memory -h)", args[0])
 }
 
 // --- session subcommand -----------------------------------------------------
@@ -910,8 +1041,9 @@ func runMemory(args []string) error {
 // runSession makes recorded sessions traceable from the shell: list them,
 // dump a full transcript (including tool calls and results), or delete one.
 func runSession(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: agent session <list|show|rename|delete> [id]")
+	if len(args) == 0 || helpRequested(args) {
+		printSubcommandUsage(os.Stdout, "session")
+		return nil
 	}
 	workDir, err := os.Getwd()
 	if err != nil {
@@ -1010,12 +1142,73 @@ func runSession(args []string) error {
 		fmt.Printf("Deleted session %s\n", args[1])
 		return nil
 	}
-	return fmt.Errorf("unknown session command %q", args[0])
+	return fmt.Errorf("unknown session command %q (try: agent session -h)", args[0])
+}
+
+// --- provider subcommand ----------------------------------------------------
+
+// runProvider makes provider selection answerable from the shell: which
+// vendors exist, whether their credential is exported, and which one the next
+// session will use. It shares its rendering and argument grammar with the
+// interactive /provider command so the two cannot drift apart.
+func runProvider(args []string) error {
+	if helpRequested(args) {
+		printSubcommandUsage(os.Stdout, "provider")
+		return nil
+	}
+	sub := "list"
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "list":
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		repl.WriteProviderList(os.Stdout, cfg, terminalWidth()-2, "agent provider use <name> [model]")
+		return nil
+	case "use":
+		name, model, wire, err := repl.ParseProviderArgs(strings.Join(args[1:], " "))
+		if err != nil {
+			return fmt.Errorf("usage: agent provider use <name> [model] [--anthropic|--openai] (%w)", err)
+		}
+		cfg, err := config.LoadForWire(name, wire)
+		if err != nil {
+			return err
+		}
+		if model != "" {
+			cfg.Model = model
+		}
+		if cfg.Model == "" {
+			return fmt.Errorf("no default model for provider %q; use: agent provider use %s <model>", name, name)
+		}
+		if err := config.SaveProviderChoice(cfg, model); err != nil {
+			return err
+		}
+		target := cfg.Provider
+		if cfg.Format != "" {
+			target += " (" + cfg.Format + " wire)"
+		}
+		fmt.Printf("Set provider = %s, model = %s\n", target, cfg.Model)
+		// Switching without a resolvable credential is allowed — the key may
+		// come from an environment variable in the shell that runs the agent —
+		// but saying so now beats a failure on the first request.
+		if _, err := cfg.BuildProvider(); err != nil {
+			fmt.Printf("warning: %v\n", err)
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown provider command %q (try: agent provider -h)", sub)
 }
 
 // --- config subcommand ------------------------------------------------------
 
 func runConfig(args []string) error {
+	if helpRequested(args) {
+		printSubcommandUsage(os.Stdout, "config")
+		return nil
+	}
 	sub := "show"
 	if len(args) > 0 {
 		sub = args[0]
@@ -1067,7 +1260,7 @@ func runConfig(args []string) error {
 		fmt.Printf("Set %s = %s (%s)\n", args[1], args[2], scope)
 		return nil
 	}
-	return fmt.Errorf("unknown config command %q (use show|init|set)", sub)
+	return fmt.Errorf("unknown config command %q (try: agent config -h)", sub)
 }
 
 func orDefault(s, def string) string {

@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"flag"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/muesli/termenv"
 
+	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/theme"
 )
 
@@ -142,5 +146,98 @@ func TestCompactArgs(t *testing.T) {
 	// Invalid JSON degrades to a truncated one-liner.
 	if got := compactArgs("not json\nsecond line"); got != "not json second line" {
 		t.Errorf("compactArgs invalid = %q", got)
+	}
+}
+
+// The usage text is the only place a user learns a subcommand exists, so it
+// must cover every command run() dispatches — including the flags, which the
+// custom usage function has to print itself.
+func TestUsageCoversEverySubcommandAndFlag(t *testing.T) {
+	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
+	fs.String("p", "", "prompt")
+	fs.Bool("q", false, "quiet")
+	var buf bytes.Buffer
+	fs.SetOutput(&buf)
+	printUsage(fs)
+	usage := buf.String()
+
+	// Every case in run()'s dispatch switch must be documented. Reading the
+	// source keeps this honest: adding a command without a usage entry fails
+	// here rather than silently shipping an undiscoverable feature.
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	start := strings.Index(body, "func run(args []string) error {")
+	end := strings.Index(body, "fs := flag.NewFlagSet")
+	if start < 0 || end < start {
+		t.Fatal("could not locate run()'s dispatch switch")
+	}
+	dispatched := regexp.MustCompile(`case "(\w+)":`).FindAllStringSubmatch(body[start:end], -1)
+	if len(dispatched) == 0 {
+		t.Fatal("no subcommands found in run()")
+	}
+	for _, m := range dispatched {
+		if !strings.Contains(usage, "\n  "+m[1]) {
+			t.Errorf("subcommand %q is dispatched but missing from the usage text", m[1])
+		}
+		// Each command must also answer "-h" itself, so a user who knows the
+		// command but not its actions is never left guessing.
+		var sub bytes.Buffer
+		printSubcommandUsage(&sub, m[1])
+		if !strings.HasPrefix(sub.String(), "Usage: agent "+m[1]) {
+			t.Errorf("subcommand %q has no per-command help: %q", m[1], sub.String())
+		}
+		if err := run([]string{m[1], "-h"}); err != nil {
+			t.Errorf("agent %s -h returned an error: %v", m[1], err)
+		}
+	}
+	// Flags are listed too — the default flag usage is replaced, not extended.
+	for _, want := range []string{"-p string", "-q"} {
+		if !strings.Contains(usage, want) {
+			t.Errorf("flag %q missing from the usage text:\n%s", want, usage)
+		}
+	}
+}
+
+// "agent provider use" is the shell-side equivalent of /provider: it must
+// resolve the same wires and persist the same keys, so a switch made from the
+// terminal is what the next session starts with.
+func TestProviderUsePersistsTheSwitch(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	t.Setenv("AGENT_BASE_URL", "")
+	t.Setenv("AGENT_PROVIDER", "")
+
+	if err := runProvider([]string{"use", "deepseek", "--anthropic"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "deepseek" || cfg.Format != "anthropic" {
+		t.Fatalf("switch not persisted: provider=%q format=%q", cfg.Provider, cfg.Format)
+	}
+	if cfg.BaseURL != "https://api.deepseek.com/anthropic" {
+		t.Errorf("wire not reflected in the endpoint: %q", cfg.BaseURL)
+	}
+
+	// Switching back clears the wire rather than leaving it pinned.
+	if err := runProvider([]string{"use", "deepseek"}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = config.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Format != "" || cfg.BaseURL != "https://api.deepseek.com" {
+		t.Errorf("stale wire kept: format=%q base=%q", cfg.Format, cfg.BaseURL)
+	}
+
+	if err := runProvider([]string{"use"}); err == nil {
+		t.Error("a missing provider name should be an error")
+	}
+	if err := runProvider([]string{"frobnicate"}); err == nil {
+		t.Error("an unknown subcommand should be an error")
 	}
 }

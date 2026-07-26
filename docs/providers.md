@@ -15,7 +15,9 @@ permission gate, plan mode, and goals behave identically across providers.
 ### Switching provider/model
 
 ```bash
-agent -provider anthropic -model claude-sonnet-5    # at launch
+agent -provider anthropic -model claude-sonnet-5    # at launch, this run only
+agent provider list                                 # from the shell: what exists, what has a key
+agent provider use kimi --anthropic                 # from the shell: persist the choice
 ```
 
 ```
@@ -23,11 +25,16 @@ agent -provider anthropic -model claude-sonnet-5    # at launch
 > /model deepseek-reasoner        # switch model only
 ```
 
+`agent provider list` prints the same listing as `/provider` (it is the same
+renderer), so you can check a vendor's credential without starting a session, and
+`agent provider use <name> [model] [--anthropic|--openai]` writes the choice to
+the global config — the non-interactive half of `/provider`.
+
 `/provider` with no argument lists your config profiles and the built-ins
-**separately** — a profile named like a preset (e.g. `zai`, or one of its aliases)
-shadows it and shows
-once, tagged "overrides built-in", so there are no duplicates. Each built-in shows
-its default model and whether its credential is exported.
+**separately** — a profile named like a preset (e.g. `zai`, or one of its
+aliases) shadows it and shows once, tagged "overrides built-in", so there are no
+duplicates. Each built-in shows its default model and whether its credential is
+exported.
 
 **`/provider <TAB>` and `/model <TAB>` complete from the catalog** (deduplicated
 against your profiles). If a credential is missing, `/provider <name>` **prompts
