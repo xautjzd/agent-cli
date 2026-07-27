@@ -6,10 +6,38 @@ against the **Anthropic Messages API** (via the official Go SDK) or any
 Grok, Qwen, Ollama, or any custom endpoint), with built-in file/shell tools, code
 navigation, skills, and project-scoped memory.
 
+## Installation
+
+**One-liner install (recommended):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xautjzd/agent-cli/main/install.sh | bash
+```
+
+This detects your OS and architecture, downloads the latest release binary from
+[GitHub Releases](https://github.com/xautjzd/agent-cli/releases), and installs it
+to `~/.local/bin` (or `/usr/local/bin` when run with sudo).
+
+Install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xautjzd/agent-cli/main/install.sh | bash -s -- --version 0.2.0
+```
+
+**Or build from source:**
+
 ```bash
 go install github.com/xautjzd/agent-cli/cmd/agent@latest
-cd my-project && agent             # then run /provider to pick a vendor and enter its key
 ```
+
+Then:
+
+```bash
+cd my-project && agent             # run /provider to pick a vendor and enter its key
+```
+
+See the [changelog](https://github.com/xautjzd/agent-cli/releases) for what changed
+in each version.
 
 ## Features
 

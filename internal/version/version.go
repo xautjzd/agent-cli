@@ -3,5 +3,7 @@
 // drift apart.
 package version
 
-// Version is the current release. Bump it here on each release.
-const Version = "0.1.0"
+// Version is the current release. Overridden at build time by GoReleaser
+// via ldflags (-X ...Version=<tag>); the literal is a fallback for
+// development builds without the injection.
+var Version = "0.1.0"

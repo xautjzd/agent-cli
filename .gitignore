@@ -2,6 +2,9 @@
 /agent
 agent.exe
 
+# GoReleaser output
+dist/
+
 # IDE / Editor
 .idea/
 .vscode/
