@@ -104,7 +104,7 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 step "Downloading ${ARCHIVE}…"
-if ! curl -fsSL --fail-with-body -o "${TMP_DIR}/${ARCHIVE}" "$ARCHIVE_URL"; then
+if ! curl -fSL -o "${TMP_DIR}/${ARCHIVE}" "$ARCHIVE_URL"; then
     # Show available assets to help the user pick a valid version/platform.
     err "Download failed for: ${ARCHIVE_URL}"
     warn "This can happen if:"
