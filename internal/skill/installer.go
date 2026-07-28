@@ -11,7 +11,7 @@ import (
 
 // Installer copies skills into a target skills directory.
 type Installer struct {
-	// TargetDir is where skills are installed, normally ~/.agent/skills.
+	// TargetDir is where skills are installed, normally ~/.agents/skills.
 	TargetDir string
 }
 

@@ -25,8 +25,8 @@ MCP server without repeating the global file.
 The global directory is resolved as:
 
 1. `$AGENT_HOME` if set, else
-2. whichever of `~/.agent` or `~/.agents` already exists (singular wins if both do), else
-3. `~/.agent` (created on demand).
+2. `~/.agents` when it already exists, else the legacy `~/.agent` when it exists,
+3. `~/.agents` (created on demand).
 
 It holds `config.json`, `skills/`, `commands/`, `AGENT.md`, cached pricing, and the
 per-project data (`projects/<encoded-path>/…` for sessions, audit log, usage).

@@ -52,7 +52,7 @@ immediately.
 
 ### `$ARGUMENTS` — pass the whole argument string
 
-`~/.agent/commands/explain.md` → run as `/explain the retry logic in @client.go`
+`~/.agents/commands/explain.md` → run as `/explain the retry logic in @client.go`
 
 ```markdown
 ---
@@ -80,7 +80,7 @@ End with a verdict: APPROVE or REQUEST_CHANGES.
 
 ### No placeholder — arguments are appended
 
-`~/.agent/commands/commit.md` → run as `/commit` (or `/commit use present tense`)
+`~/.agents/commands/commit.md` → run as `/commit` (or `/commit use present tense`)
 
 ```markdown
 ---
@@ -96,7 +96,7 @@ an extra instruction — so `/commit keep it to one line` still works.
 
 ### Namespaced via a nested directory
 
-`~/.agent/commands/git/sync.md` → run as `/git:sync`
+`~/.agents/commands/git/sync.md` → run as `/git:sync`
 
 ```markdown
 ---

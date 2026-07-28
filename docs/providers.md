@@ -301,7 +301,7 @@ correct.
 
 ## Example configurations
 
-Complete `config.json` files for common setups — drop one into `~/.agent/config.json`
+Complete `config.json` files for common setups — drop one into `~/.agents/config.json`
 (global) or `<project>/.agent/config.json` (project).
 
 ### DeepSeek (default), with a local Ollama fallback

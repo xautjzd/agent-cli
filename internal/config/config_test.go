@@ -10,7 +10,7 @@ import (
 )
 
 // isolateHome points HOME (and clears env overrides) at a temp dir so tests
-// never touch the user's real ~/.agent/config.json.
+// never touch the user's real ~/.agents/config.json.
 func isolateHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
@@ -428,7 +428,7 @@ func TestSetPersistsOnlyFileValues(t *testing.T) {
 	}
 
 	// The file must contain the set value, not the env value.
-	data, err := os.ReadFile(filepath.Join(home, ".agent", "config.json"))
+	data, err := os.ReadFile(filepath.Join(home, ".agents", "config.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

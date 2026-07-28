@@ -3,7 +3,7 @@
 // Two complementary mechanisms are provided:
 //
 //  1. Instruction files (AGENT.md): user-authored context loaded verbatim
-//     into the system prompt, read from ~/.agent/AGENT.md (global) and
+//     into the system prompt, read from ~/.agents/AGENT.md (global) and
 //     <project>/AGENT.md (project), project last so it wins on conflicts.
 //  2. A memory store (.agent/memory/*.md): facts the agent saves during
 //     sessions via the remember tool, indexed and re-loaded next session.

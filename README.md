@@ -149,7 +149,7 @@ internal/session/     Session persistence for /resume (one JSON file per session
 internal/checkpoint/  Per-turn file snapshots for /rewind
 internal/theme/       Semantic color roles + built-in themes
 internal/diff/        Line-oriented unified diff engine
-internal/home/        Resolves the agent home directory (~/.agent or ~/.agents)
+internal/home/        Resolves the agent home directory (~/.agents; legacy ~/.agent)
 internal/repl/        Interactive session: full-screen TUI, live completion, slash commands
 ```
 

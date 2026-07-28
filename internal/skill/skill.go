@@ -4,7 +4,7 @@
 // A skill is a directory containing a SKILL.md file with YAML frontmatter
 // (name, description) followed by markdown instructions — the same layout
 // used by Claude Code under ~/.claude/skills. This CLI reads the shared
-// ~/.agent/skills directory so skills can be reused across agent tools.
+// ~/.agents/skills directory so skills can be reused across agent tools.
 package skill
 
 import (
@@ -47,7 +47,7 @@ type FSRepository struct {
 }
 
 // DefaultRoots returns the standard skill locations: the shared user-level
-// ~/.agent/skills plus the project-local .agent/skills.
+// ~/.agents/skills plus the project-local .agent/skills.
 func DefaultRoots(projectDir string) []string {
 	var roots []string
 	if dir := home.Path("skills"); dir != "" {

@@ -1,10 +1,9 @@
 // Package home resolves the agent's user-level directory, which holds the
 // global config, skills and instructions.
 //
-// Both `~/.agent` and `~/.agents` are recognized: the singular form is the
-// documented default, but the plural is a common spelling and silently
-// ignoring a populated one leaves users staring at defaults with no clue
-// why their configuration had no effect.
+// Both `~/.agents` and the legacy `~/.agent` are recognized. The plural form
+// follows the shared agent-skills convention and is the default for new users;
+// an existing singular directory remains supported for compatibility.
 package home
 
 import (
@@ -13,7 +12,7 @@ import (
 )
 
 // Candidate directory names, in preference order.
-var candidates = []string{".agent", ".agents"}
+var candidates = []string{".agents", ".agent"}
 
 // Dir returns the agent home directory.
 //

@@ -2,7 +2,7 @@
 // modeled on Claude Code / codex / opencode:
 //
 //	command-line flags > environment variables > project config
-//	(<project>/.agent/config.json) > global config (~/.agent/config.json)
+//	(<project>/.agent/config.json) > global config (~/.agents/config.json)
 //	> defaults
 //
 // Named provider profiles (the "providers" map) let any OpenAI-compatible
@@ -275,7 +275,7 @@ type LSPServerConfig struct {
 type Scope string
 
 const (
-	// ScopeGlobal targets ~/.agent/config.json.
+	// ScopeGlobal targets ~/.agents/config.json.
 	ScopeGlobal Scope = "global"
 	// ScopeProject targets <project>/.agent/config.json, which overrides
 	// the global file for that project.
@@ -291,7 +291,7 @@ func defaultModel(providerName string) string {
 }
 
 // Path returns the global config file location, e.g.
-// ~/.agent/config.json (see the home package for directory resolution).
+// ~/.agents/config.json (see the home package for directory resolution).
 func Path() (string, error) {
 	return home.Path("config.json"), nil
 }
@@ -1140,7 +1140,7 @@ func validatePositiveInt(s string) error {
 	return nil
 }
 
-// Save writes the global config file, creating ~/.agent if needed.
+// Save writes the global config file, creating ~/.agents if needed.
 func (c *Config) Save() error {
 	path, err := Path()
 	if err != nil {

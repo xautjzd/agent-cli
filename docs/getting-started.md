@@ -44,7 +44,7 @@ OpenRouter, SiliconFlow, Ollama…) — naming one is the whole configuration. S
 **[Providers & models](providers.md)**.
 
 ```bash
-agent config init                      # write a starter ~/.agent/config.json (0600)
+agent config init                      # write a starter ~/.agents/config.json (0600)
 agent config set provider deepseek     # equivalent to "agent provider use deepseek"
 agent config show                      # see the resolved config + file paths
 ```
