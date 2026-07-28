@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"flag"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -14,6 +17,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/theme"
+	"github.com/xautjzd/agent-cli/internal/update"
 )
 
 // TestMain forces a 16-color profile so the terminal renderer emits ANSI
@@ -285,5 +289,167 @@ func TestUnconfiguredProviderStartsInteractiveOnly(t *testing.T) {
 	if setupErr, ok := provider.SetupError(fresh.Agent.Provider); !ok ||
 		!strings.Contains(setupErr.Error(), "no provider configured") {
 		t.Errorf("placeholder should explain that nothing is configured, got %v", setupErr)
+	}
+}
+
+func TestShouldCheckForUpdateOnlyOnInteractiveReleaseStartup(t *testing.T) {
+	tests := []struct {
+		name                             string
+		interactive, stdinTTY, stdoutTTY bool
+		disabled, current                string
+		want                             bool
+	}{
+		{"interactive release", true, true, true, "", "0.1.1", true},
+		{"non-interactive prompt", false, true, true, "", "0.1.1", false},
+		{"piped input", true, false, true, "", "0.1.1", false},
+		{"redirected output", true, true, false, "", "0.1.1", false},
+		{"disabled", true, true, true, "1", "0.1.1", false},
+		{"development build", true, true, true, "", "dev", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldCheckForUpdate(
+				tt.interactive,
+				tt.stdinTTY,
+				tt.stdoutTTY,
+				tt.disabled,
+				tt.current,
+			)
+			if got != tt.want {
+				t.Fatalf("shouldCheckForUpdate = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleStartupUpdateChoices(t *testing.T) {
+	release := update.Release{
+		Version:  "0.2.0",
+		Tag:      "v0.2.0",
+		NotesURL: "https://github.com/xautjzd/agent-cli/releases/tag/v0.2.0",
+	}
+	checker := checkerFunc(func(context.Context, string) (update.Release, bool, error) {
+		return release, true, nil
+	})
+
+	t.Run("skip continues", func(t *testing.T) {
+		installed := false
+		proceed := handleStartupUpdate(
+			context.Background(),
+			"0.1.1",
+			checker,
+			installerFunc(func(context.Context, update.Release) error {
+				installed = true
+				return nil
+			}),
+			promptAction(update.ActionSkip),
+			strings.NewReader(""),
+			io.Discard,
+		)
+		if !proceed || installed {
+			t.Fatalf("proceed=%v installed=%v, want true/false", proceed, installed)
+		}
+	})
+
+	t.Run("exit stops", func(t *testing.T) {
+		if proceed := handleStartupUpdate(
+			context.Background(),
+			"0.1.1",
+			checker,
+			installerFunc(func(context.Context, update.Release) error {
+				t.Fatal("exit must not install")
+				return nil
+			}),
+			promptAction(update.ActionExit),
+			strings.NewReader(""),
+			io.Discard,
+		); proceed {
+			t.Fatal("exit should stop startup")
+		}
+	})
+
+	t.Run("successful update stops and shows versions", func(t *testing.T) {
+		var out strings.Builder
+		if proceed := handleStartupUpdate(
+			context.Background(),
+			"0.1.1",
+			checker,
+			installerFunc(func(_ context.Context, got update.Release) error {
+				if got != release {
+					t.Fatalf("installed release = %+v", got)
+				}
+				return nil
+			}),
+			promptAction(update.ActionUpdate),
+			strings.NewReader(""),
+			&out,
+		); proceed {
+			t.Fatal("successful update should stop the old process")
+		}
+		if !strings.Contains(out.String(), "0.1.1 → 0.2.0") {
+			t.Fatalf("success output does not show versions:\n%s", out.String())
+		}
+	})
+
+	t.Run("failed update preserves startup and shows manual command", func(t *testing.T) {
+		var out strings.Builder
+		if proceed := handleStartupUpdate(
+			context.Background(),
+			"0.1.1",
+			checker,
+			installerFunc(func(context.Context, update.Release) error {
+				return errors.New("read-only install")
+			}),
+			promptAction(update.ActionUpdate),
+			strings.NewReader(""),
+			&out,
+		); !proceed {
+			t.Fatal("failed update should allow the existing version to start")
+		}
+		if !strings.Contains(out.String(), "--version 0.2.0") {
+			t.Fatalf("manual command missing:\n%s", out.String())
+		}
+	})
+}
+
+func TestHandleStartupUpdateLookupFailureIsSilentAndNonBlocking(t *testing.T) {
+	prompted := false
+	proceed := handleStartupUpdate(
+		context.Background(),
+		"0.1.1",
+		checkerFunc(func(context.Context, string) (update.Release, bool, error) {
+			return update.Release{}, false, errors.New("offline")
+		}),
+		installerFunc(func(context.Context, update.Release) error {
+			t.Fatal("offline lookup must not install")
+			return nil
+		}),
+		func(io.Reader, io.Writer, string, update.Release) (update.Action, error) {
+			prompted = true
+			return update.ActionSkip, nil
+		},
+		strings.NewReader(""),
+		io.Discard,
+	)
+	if !proceed || prompted {
+		t.Fatalf("proceed=%v prompted=%v, want true/false", proceed, prompted)
+	}
+}
+
+type checkerFunc func(context.Context, string) (update.Release, bool, error)
+
+func (f checkerFunc) Latest(ctx context.Context, current string) (update.Release, bool, error) {
+	return f(ctx, current)
+}
+
+type installerFunc func(context.Context, update.Release) error
+
+func (f installerFunc) Install(ctx context.Context, release update.Release) error {
+	return f(ctx, release)
+}
+
+func promptAction(action update.Action) updatePrompt {
+	return func(io.Reader, io.Writer, string, update.Release) (update.Action, error) {
+		return action, nil
 	}
 }

@@ -19,7 +19,7 @@
   - Verify: `go test ./internal/update -run 'Prompt|Model'`
   - Files: `internal/update/prompt.go`, `internal/update/prompt_test.go`
 
-- [ ] Integrate the interactive startup gate.
+- [x] Integrate the interactive startup gate.
   - Acceptance: only an interactive release launch checks; skip continues, exit
     ends cleanly, disabled/dev/non-interactive paths do no network work.
   - Verify: `go test ./cmd/agent`

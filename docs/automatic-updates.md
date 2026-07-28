@@ -81,7 +81,8 @@ the startup gate decides whether to continue, update, or exit.
 - Skip continues immediately and only affects the current launch.
 - Exit ends cleanly without constructing the agent session.
 - Update verifies `checksums.txt`, atomically replaces writable macOS/Linux
-  binaries, and never damages the installed binary on failure.
+  binaries, never damages the installed binary on failure, then exits cleanly
+  and asks the user to run `agent` again.
 - Windows and unwritable installations receive a clear manual upgrade command.
 - `AGENT_NO_UPDATE_CHECK=1`, non-interactive invocations, unavailable GitHub,
   and development builds continue without a prompt.

@@ -57,6 +57,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/webtool"
 
 	"github.com/xautjzd/agent-cli/internal/tool"
+	"github.com/xautjzd/agent-cli/internal/update"
 	"golang.org/x/term"
 )
 
@@ -254,6 +255,21 @@ func run(args []string) error {
 		theme.Set(cfg.Theme)
 	}
 
+	if shouldCheckForUpdate(*prompt == "", isTTY(os.Stdin), isTTY(os.Stdout), os.Getenv("AGENT_NO_UPDATE_CHECK"), version.Version) {
+		proceed := handleStartupUpdate(
+			context.Background(),
+			version.Version,
+			update.NewChecker(),
+			update.NewInstaller(),
+			update.Prompt,
+			os.Stdin,
+			os.Stdout,
+		)
+		if !proceed {
+			return nil
+		}
+	}
+
 	workDir, err := os.Getwd()
 	if err != nil {
 		return err
@@ -366,6 +382,69 @@ func round2(f float64) float64 { return float64(int64(f*100+0.5)) / 100 }
 
 // isTTY reports whether f is an interactive terminal.
 func isTTY(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
+
+type releaseChecker interface {
+	Latest(context.Context, string) (update.Release, bool, error)
+}
+
+type releaseInstaller interface {
+	Install(context.Context, update.Release) error
+}
+
+type updatePrompt func(io.Reader, io.Writer, string, update.Release) (update.Action, error)
+
+func shouldCheckForUpdate(interactive, stdinTTY, stdoutTTY bool, disabled, current string) bool {
+	if !interactive || !stdinTTY || !stdoutTTY || disabled == "1" {
+		return false
+	}
+	// Latest treats non-semver builds as development builds without accessing
+	// the network. Keep this cheap gate explicit so tests and startup behavior
+	// do not depend on an HTTP client being constructed.
+	return current != "" && current != "dev"
+}
+
+// handleStartupUpdate returns whether startup should continue. Lookup failures
+// are intentionally non-fatal; explicit Exit and a successful replacement end
+// the current process before any session resources are constructed.
+func handleStartupUpdate(
+	ctx context.Context,
+	current string,
+	checker releaseChecker,
+	installer releaseInstaller,
+	prompt updatePrompt,
+	in io.Reader,
+	out io.Writer,
+) bool {
+	release, available, err := checker.Latest(ctx, current)
+	if err != nil || !available {
+		if err != nil {
+			log.Debug("update", "latest release check failed: %v", err)
+		}
+		return true
+	}
+	action, err := prompt(in, out, current, release)
+	if err != nil {
+		log.Debug("update", "update prompt failed: %v", err)
+		return true
+	}
+	switch action {
+	case update.ActionSkip:
+		return true
+	case update.ActionExit:
+		return false
+	case update.ActionUpdate:
+		fmt.Fprintf(out, "Downloading and verifying agent-cli %s…\n", release.Version)
+		if err := installer.Install(ctx, release); err != nil {
+			fmt.Fprintf(out, "Update failed: %v\n", err)
+			fmt.Fprintf(out, "Manual update:\n  %s\n\n", update.ManualCommand(release.Version))
+			return true
+		}
+		fmt.Fprintf(out, "✓ Updated agent-cli %s → %s. Run agent again to use the new version.\n", current, release.Version)
+		return false
+	default:
+		return true
+	}
+}
 
 // countOK counts how many MCP server statuses report a successful connection.
 func countOK(statuses []mcp.ServerStatus) int {

@@ -3,7 +3,7 @@
 // drift apart.
 package version
 
-// Version is the current release. Overridden at build time by GoReleaser
-// via ldflags (-X ...Version=<tag>); the literal is a fallback for
-// development builds without the injection.
-var Version = "0.1.0"
+// Version is overridden at build time by GoReleaser via ldflags
+// (-X ...Version=<tag>). Source builds stay "dev", which also prevents them
+// from offering to overwrite themselves with a packaged release.
+var Version = "dev"
