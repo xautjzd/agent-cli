@@ -13,7 +13,7 @@
   - Verify: `go test ./internal/update -run 'Install'`
   - Files: `internal/update/install.go`, `internal/update/install_test.go`
 
-- [ ] Implement the update choice screen.
+- [x] Implement the update choice screen.
   - Acceptance: current and latest versions, release notes, and Update/Skip/Exit
     choices render and work by arrow keys and number keys.
   - Verify: `go test ./internal/update -run 'Prompt|Model'`
