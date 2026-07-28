@@ -44,6 +44,30 @@ When one is available, the prompt shows the current and target versions and lets
 you update, skip this launch, or exit. Set `AGENT_NO_UPDATE_CHECK=1` to disable
 the check. See [Automatic updates](docs/automatic-updates.md) for details.
 
+### Uninstall
+
+Run the built-in uninstaller and choose whether to keep or clean user data:
+
+```bash
+agent uninstall
+```
+
+The first choice removes only the current executable. The cleanup choice
+removes only `~/.agents/config.json` and the `~/.agents/projects/` cache; skills,
+commands, memory, and every other file under `~/.agents` are preserved.
+
+For a non-interactive uninstall:
+
+```bash
+agent uninstall --yes           # keep all user data
+agent uninstall --purge --yes   # remove config.json and projects/ only
+```
+
+An existing legacy `~/.agent` installation remains supported, and
+`AGENT_HOME` is respected. The installer may add `~/.local/bin` to `PATH`; the
+uninstaller leaves that shared PATH entry in place because other programs may
+use the same directory.
+
 ## Features
 
 - **Agentic loop** — the model plans, calls tools, reads results, and iterates until done.

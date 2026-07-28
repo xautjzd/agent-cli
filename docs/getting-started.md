@@ -76,3 +76,14 @@ typing a request. Type `/help` for an in-session overview and `/exit` to quit.
 agent version        # prints the version
 agent config show    # confirms provider, model, and which credential is set
 ```
+
+## Uninstall
+
+```bash
+agent uninstall
+```
+
+Choose the first option to remove only the executable. The cleanup option
+removes only `<agent-home>/config.json` and `<agent-home>/projects/`; it keeps
+skills, commands, memory, and the agent-home directory itself. Automation can
+use `agent uninstall --yes`, or add `--purge` for the limited data cleanup.
