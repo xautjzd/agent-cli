@@ -46,6 +46,9 @@ func NewInstaller() Installer {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Scheme != "https" {
+				return fmt.Errorf("refusing non-HTTPS release redirect")
+			}
 			host := strings.ToLower(req.URL.Hostname())
 			if host != "github.com" && !strings.HasSuffix(host, ".githubusercontent.com") {
 				return fmt.Errorf("refusing release redirect to %q", host)

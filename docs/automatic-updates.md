@@ -51,8 +51,8 @@ the startup gate decides whether to continue, update, or exit.
 
 - Table tests for release version ordering, including `v` prefixes and
   prerelease rejection.
-- `httptest` coverage for success, timeout/error, response limits, unexpected
-  repository data, redirects, and missing assets.
+- `httptest` coverage for success, timeout/error, response limits, unstable
+  releases, redirect policy, and missing or malformed checksums.
 - Temporary archives and checksums for successful install, checksum mismatch,
   unsafe archive paths, and atomic replacement failure.
 - Picker model tests for displayed `current → latest` versions and all three
@@ -70,6 +70,19 @@ the startup gate decides whether to continue, update, or exit.
 - Never: execute a downloaded shell script, invoke a shell with remote input,
   request sudo, overwrite the running binary before verification, or block
   startup because the update service is unavailable.
+
+## Design rationale
+
+The automatic path downloads only versioned assets from this repository's
+GitHub Releases, verifies the archive against the release checksum, and performs
+one same-filesystem rename after the replacement is complete. It does not run
+the convenient shell installer shown for manual recovery because executing
+fresh remote script content during every update would add avoidable risk.
+
+GoReleaser injects the release version into packaged binaries. Binaries installed
+with `go install module@version` recover the same stable version from Go build
+metadata; local checkout builds remain `dev` and do not offer to replace
+themselves.
 
 ## Success criteria
 

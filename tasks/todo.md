@@ -25,7 +25,7 @@
   - Verify: `go test ./cmd/agent`
   - Files: `cmd/agent/main.go`, `cmd/agent/main_test.go`
 
-- [ ] Complete review and verification.
+- [x] Complete review and verification.
   - Acceptance: docs match behavior, all checks pass, no secrets or unsafe
     remote execution exists, and the result is committed to `main`.
   - Verify: `go vet ./internal/update ./cmd/agent && go test ./...`

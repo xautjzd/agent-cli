@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,6 +85,35 @@ func TestInstallRequiresManualUpdateOnWindows(t *testing.T) {
 	installer.goos = "windows"
 	if err := installer.Install(context.Background(), testRelease()); !errors.Is(err, ErrManualUpdate) {
 		t.Fatalf("Install error = %v, want ErrManualUpdate", err)
+	}
+}
+
+func TestInstallerRejectsUntrustedRedirects(t *testing.T) {
+	t.Parallel()
+	check := NewInstaller().client.CheckRedirect
+	tests := []struct {
+		name string
+		url  string
+		ok   bool
+	}{
+		{name: "GitHub HTTPS", url: "https://github.com/asset", ok: true},
+		{name: "GitHub objects HTTPS", url: "https://objects.githubusercontent.com/asset", ok: true},
+		{name: "untrusted host", url: "https://example.com/asset"},
+		{name: "HTTP downgrade", url: "http://github.com/asset"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			target, err := url.Parse(tt.url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = check(&http.Request{URL: target}, nil)
+			if (err == nil) != tt.ok {
+				t.Fatalf("redirect to %s error = %v, want allowed=%v", tt.url, err, tt.ok)
+			}
+		})
 	}
 }
 

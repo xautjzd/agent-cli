@@ -10,6 +10,7 @@ Each guide is split into a **Usage** part (how to drive the feature) and a
 
 ### Basics
 - [Getting started](getting-started.md) — install, first run, quick start.
+- [Automatic updates](automatic-updates.md) — startup checks, update choices, verification, and opt-out.
 - [Configuration](configuration.md) — precedence, files, every config key, `agent config`, and the `/config` panel.
 - [Providers & models](providers.md) — built-in provider presets, named profiles, the Anthropic Messages API, third-party gateways, and prompt caching.
 

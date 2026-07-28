@@ -39,6 +39,11 @@ cd my-project && agent             # run /provider to pick a vendor and enter it
 See the [changelog](https://github.com/xautjzd/agent-cli/releases) for what changed
 in each version.
 
+On interactive startup, release builds check briefly for a newer stable version.
+When one is available, the prompt shows the current and target versions and lets
+you update, skip this launch, or exit. Set `AGENT_NO_UPDATE_CHECK=1` to disable
+the check. See [Automatic updates](docs/automatic-updates.md) for details.
+
 ## Features
 
 - **Agentic loop** — the model plans, calls tools, reads results, and iterates until done.
@@ -99,6 +104,7 @@ Detailed usage and configuration guides live in **[`docs/`](docs/README.md)**.
 | Guide | What it covers |
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, first run, quick start |
+| [Automatic updates](docs/automatic-updates.md) | Startup checks, update choices, verification, opt-out |
 | [Configuration](docs/configuration.md) | Precedence, files, every config key, `agent config`, the `/config` panel |
 | [Providers & models](docs/providers.md) | Presets, named profiles, the Anthropic API, gateways, prompt caching |
 | [Interactive session](docs/interactive-session.md) | The TUI, keybindings, full slash-command reference, output rendering |
