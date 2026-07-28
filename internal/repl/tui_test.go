@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -31,6 +32,24 @@ func TestScrollbackWritesAndNotifies(t *testing.T) {
 	}
 	if notified != 2 {
 		t.Errorf("notify called %d times, want 2", notified)
+	}
+}
+
+func TestTUIProgramDoesNotEnableMouseReporting(t *testing.T) {
+	// Ctrl-C exits the program after startup, leaving the emitted terminal
+	// control sequences available for inspection.
+	r, _, output := newTestRepl(t, string([]byte{3}))
+	if err := r.runTUI(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Contains(output.Bytes(), []byte("\x1b[?1049h")) {
+		t.Fatal("TUI startup sequence was not captured")
+	}
+	for _, seq := range []string{"\x1b[?1002h", "\x1b[?1003h", "\x1b[?1006h"} {
+		if bytes.Contains(output.Bytes(), []byte(seq)) {
+			t.Errorf("TUI enabled mouse reporting with %q; native text selection would be captured", seq)
+		}
 	}
 }
 

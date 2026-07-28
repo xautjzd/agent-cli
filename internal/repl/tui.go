@@ -281,7 +281,10 @@ func (r *Repl) runTUI(ctx context.Context) error {
 		input: ti,
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(),
+	// Deliberately leave Bubble Tea's mouse reporting disabled. Enabling cell
+	// motion makes the terminal send drag events to the application, which
+	// prevents users from selecting transcript text with the mouse.
+	p := tea.NewProgram(m, tea.WithAltScreen(),
 		tea.WithInput(r.In), tea.WithOutput(realOut))
 	m.program = p
 

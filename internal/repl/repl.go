@@ -1600,7 +1600,7 @@ func (r *Repl) cmdCopy(_ context.Context, _ string) error {
 	chars := len(content)
 	fmt.Fprintf(r.Out, "Copied %d lines (%s characters) to clipboard.\n",
 		lines, formatNumber(chars))
-	fmt.Fprintln(r.Out, "Tip: you can also hold Shift while selecting text with your mouse for native terminal selection (works in iTerm2, Kitty, WezTerm, Windows Terminal, etc.).")
+	fmt.Fprintln(r.Out, "Tip: you can also drag over session text to select and copy it directly.")
 	return nil
 }
 
