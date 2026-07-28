@@ -1,13 +1,27 @@
 package uninstall
 
 import (
-	"bufio"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/xautjzd/agent-cli/internal/theme"
 )
+
+// Choice is the action selected from the interactive uninstall prompt.
+type Choice int
+
+const (
+	ChoiceKeep Choice = iota
+	ChoicePurge
+	ChoiceCancel
+)
+
+type promptFunc func(io.Reader, io.Writer, Uninstaller, bool, string) (Choice, error)
 
 // Run parses the uninstall command, prompts when needed, and removes the
 // validated targets. Environment-specific paths and terminal state are passed
@@ -20,6 +34,19 @@ func Run(
 	agentHome string,
 	interactive bool,
 	currentVersion string,
+) error {
+	return run(args, in, out, executable, agentHome, interactive, currentVersion, Prompt)
+}
+
+func run(
+	args []string,
+	in io.Reader,
+	out io.Writer,
+	executable string,
+	agentHome string,
+	interactive bool,
+	currentVersion string,
+	prompt promptFunc,
 ) error {
 	fs := flag.NewFlagSet("agent uninstall", flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -39,45 +66,32 @@ func Run(
 	if err != nil {
 		return err
 	}
-	selectedPurge := *purge
-	if !*yes {
+	choice := ChoiceKeep
+	if *yes {
+		if *purge {
+			choice = ChoicePurge
+		}
+		printUninstallTargets(out, remover, choice == ChoicePurge, currentVersion)
+	} else {
 		if !interactive {
 			return fmt.Errorf("uninstall requires an interactive terminal; pass --yes to confirm")
 		}
-		if *purge {
-			printUninstallTargets(out, remover, true, currentVersion)
-			confirmed, err := readConfirmation(in, out)
-			if err != nil {
-				return err
-			}
-			if !confirmed {
-				fmt.Fprintln(out, "Uninstall cancelled.")
-				return nil
-			}
-		} else {
-			action, err := readUninstallChoice(in, out, remover, currentVersion)
-			if err != nil {
-				return err
-			}
-			switch action {
-			case 1:
-				selectedPurge = false
-			case 2:
-				selectedPurge = true
-			default:
-				fmt.Fprintln(out, "Uninstall cancelled.")
-				return nil
-			}
+		choice, err = prompt(in, out, remover, *purge, currentVersion)
+		if err != nil {
+			return err
 		}
-	} else {
-		printUninstallTargets(out, remover, selectedPurge, currentVersion)
+	}
+	if choice == ChoiceCancel {
+		fmt.Fprintln(out, "Uninstall cancelled.")
+		return nil
 	}
 
-	if err := remover.Remove(selectedPurge); err != nil {
+	purgeData := choice == ChoicePurge
+	if err := remover.Remove(purgeData); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "\nRemoved agent-cli %s from %s.\n", currentVersion, remover.Executable())
-	if selectedPurge {
+	if purgeData {
 		fmt.Fprintf(out, "Removed %s and %s.\n", remover.Config(), remover.Projects())
 		fmt.Fprintf(out, "Preserved all other data in %s.\n", remover.Home())
 	} else {
@@ -86,44 +100,115 @@ func Run(
 	return nil
 }
 
-func readUninstallChoice(in io.Reader, out io.Writer, remover Uninstaller, currentVersion string) (int, error) {
-	fmt.Fprintf(out, "Uninstall agent-cli %s\n\n", currentVersion)
-	fmt.Fprintf(out, "Executable:\n  %s\n\n", remover.Executable())
-	fmt.Fprintln(out, "1. Uninstall and keep all user data")
-	fmt.Fprintln(out, "2. Uninstall and also remove:")
-	fmt.Fprintf(out, "   %s\n", remover.Config())
-	fmt.Fprintf(out, "   %s\n", remover.Projects())
-	fmt.Fprintln(out, "3. Cancel")
-	fmt.Fprint(out, "\nChoose 1, 2, or 3: ")
+type promptModel struct {
+	remover        Uninstaller
+	currentVersion string
+	purgeOnly      bool
+	selected       int
+	choice         Choice
+	chosen         bool
+}
 
-	line, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return 0, fmt.Errorf("read uninstall choice: %w", err)
-	}
-	switch strings.TrimSpace(line) {
-	case "1":
-		return 1, nil
-	case "2":
-		return 2, nil
-	case "3", "":
-		return 3, nil
-	default:
-		return 0, fmt.Errorf("invalid choice: enter 1, 2, or 3")
+func newPromptModel(remover Uninstaller, purgeOnly bool, currentVersion string) *promptModel {
+	return &promptModel{
+		remover:        remover,
+		currentVersion: currentVersion,
+		purgeOnly:      purgeOnly,
+		choice:         ChoiceCancel,
 	}
 }
 
-func readConfirmation(in io.Reader, out io.Writer) (bool, error) {
-	fmt.Fprint(out, "\nContinue? [y/N]: ")
-	line, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, fmt.Errorf("read uninstall confirmation: %w", err)
+func (m *promptModel) Init() tea.Cmd { return nil }
+
+func (m *promptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
 	}
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "y", "yes":
-		return true, nil
-	default:
-		return false, nil
+	count := 3
+	if m.purgeOnly {
+		count = 2
 	}
+	switch key.Type {
+	case tea.KeyUp, tea.KeyCtrlP:
+		m.selected = (m.selected + count - 1) % count
+	case tea.KeyDown, tea.KeyCtrlN, tea.KeyTab:
+		m.selected = (m.selected + 1) % count
+	case tea.KeyEnter:
+		if m.purgeOnly {
+			if m.selected == 0 {
+				m.choice = ChoicePurge
+			} else {
+				m.choice = ChoiceCancel
+			}
+		} else {
+			m.choice = Choice(m.selected)
+		}
+		m.chosen = true
+		return m, tea.Quit
+	case tea.KeyEsc, tea.KeyCtrlC:
+		m.choice = ChoiceCancel
+		m.chosen = true
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m *promptModel) View() string {
+	if m.chosen {
+		return ""
+	}
+	th := theme.Current()
+	var b strings.Builder
+	fmt.Fprintf(&b, "Uninstall agent-cli %s\n\n", m.currentVersion)
+	fmt.Fprintf(&b, "%s\n  %s\n\n", th.Paint(th.Muted, "Executable:"), m.remover.Executable())
+
+	var options []string
+	if m.purgeOnly {
+		fmt.Fprintf(&b, "%s\n  %s\n  %s\n\n",
+			th.Paint(th.Muted, "Also remove:"),
+			m.remover.Config(),
+			m.remover.Projects(),
+		)
+		options = []string{"Continue", "Cancel"}
+	} else {
+		options = []string{
+			"Uninstall and keep all user data",
+			"Uninstall and remove config + project cache",
+			"Cancel",
+		}
+	}
+	for i, option := range options {
+		prefix := "  "
+		if i == m.selected {
+			prefix = "› "
+			option = th.Paint(th.Accent, option)
+		}
+		fmt.Fprintln(&b, prefix+option)
+		if !m.purgeOnly && i == int(ChoicePurge) {
+			fmt.Fprintf(&b, "    %s\n    %s\n", m.remover.Config(), m.remover.Projects())
+		}
+	}
+	fmt.Fprint(&b, "\n"+th.Paint(th.Muted, "↑↓ select · enter confirm · esc cancel"))
+	return b.String()
+}
+
+// Prompt renders the keyboard-driven uninstall selector.
+func Prompt(in io.Reader, out io.Writer, remover Uninstaller, purgeOnly bool, currentVersion string) (Choice, error) {
+	model := newPromptModel(remover, purgeOnly, currentVersion)
+	result, err := tea.NewProgram(
+		model,
+		tea.WithInput(in),
+		tea.WithOutput(out),
+	).Run()
+	if err != nil {
+		return ChoiceCancel, err
+	}
+	final := result.(*promptModel)
+	if !final.chosen {
+		return ChoiceCancel, nil
+	}
+	return final.choice, nil
 }
 
 func printUninstallTargets(out io.Writer, remover Uninstaller, purge bool, currentVersion string) {

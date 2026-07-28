@@ -83,7 +83,8 @@ agent config show    # confirms provider, model, and which credential is set
 agent uninstall
 ```
 
-Choose the first option to remove only the executable. The cleanup option
-removes only `<agent-home>/config.json` and `<agent-home>/projects/`; it keeps
-skills, commands, memory, and the agent-home directory itself. Automation can
-use `agent uninstall --yes`, or add `--purge` for the limited data cleanup.
+Use `↑`/`↓` to select, Enter to confirm, or Esc to cancel. The first option
+removes only the executable. The cleanup option removes only
+`<agent-home>/config.json` and `<agent-home>/projects/`; it keeps skills,
+commands, memory, and the agent-home directory itself. Automation can use
+`agent uninstall --yes`, or add `--purge` for the limited data cleanup.

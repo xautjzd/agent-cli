@@ -52,7 +52,8 @@ Run the built-in uninstaller and choose whether to keep or clean user data:
 agent uninstall
 ```
 
-The first choice removes only the current executable. The cleanup choice
+Use `↑`/`↓` to select, Enter to confirm, or Esc to cancel. The first choice
+removes only the current executable. The cleanup choice
 removes only `~/.agents/config.json` and the `~/.agents/projects/` cache; skills,
 commands, memory, and every other file under `~/.agents` are preserved.
 
