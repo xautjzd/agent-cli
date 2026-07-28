@@ -14,7 +14,7 @@ input box**.
 ╭──────────────────────────────────────────────────────────────╮
 │ >                                                            │
 ╰──────────────────────────────────────────────────────────────╯
-  ↑↓ history/menu · tab accept · pgup/pgdn scroll · /exit
+  ↑↓ scroll/menu · ctrl-p/ctrl-n history · tab accept · /exit
 ```
 
 Because the program owns the whole viewport, **resizing the terminal repaints
@@ -28,7 +28,8 @@ reading. See **[Non-interactive mode](non-interactive.md)** for `agent -p`.
 
 | Key | Action |
 |---|---|
-| `↑` / `↓` (or `Ctrl-P` / `Ctrl-N`) | Navigate the candidate menu, or input history when no menu is open |
+| `↑` / `↓` | Navigate an open candidate menu; otherwise scroll the conversation (including mouse wheel/trackpad alternate-scroll input) |
+| `Ctrl-P` / `Ctrl-N` | Navigate an open candidate menu, or input history when no menu is open |
 | `Tab` | Accept the highlighted candidate |
 | `Enter` | Submit (or run a highlighted `/`-command directly) |
 | `PgUp` / `PgDn` | Scroll the conversation |

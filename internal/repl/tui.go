@@ -318,6 +318,14 @@ func (r *Repl) runTUI(ctx context.Context) error {
 		r.tuiStats = nil
 	}()
 
+	// DEC alternate-scroll mode translates wheel/trackpad gestures into
+	// cursor-key input while the alternate screen is active. Unlike mouse
+	// reporting, it leaves drag selection under the terminal's control.
+	if _, err := io.WriteString(realOut, "\x1b[?1007h"); err != nil {
+		return err
+	}
+	defer func() { _, _ = io.WriteString(realOut, "\x1b[?1007l") }()
+
 	_, err := p.Run()
 	return err
 }
@@ -455,9 +463,19 @@ func (m *tuiModel) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleStatsKey(key)
 	}
 
-	// Scrolling works in every other mode.
+	// Scrolling works in every other mode. With DEC alternate-scroll enabled,
+	// wheel and trackpad gestures arrive as Up/Down key messages.
 	switch key.Type {
 	case tea.KeyPgUp, tea.KeyPgDown, tea.KeyCtrlU, tea.KeyCtrlD:
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(key)
+		return m, cmd
+	case tea.KeyUp, tea.KeyDown:
+		// Arrow keys still navigate an open completion menu. Otherwise they
+		// scroll the transcript, including while a turn or prompt is active.
+		if !m.busy && m.ask == nil && len(m.cands) > 0 {
+			break
+		}
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(key)
 		return m, cmd
@@ -701,8 +719,8 @@ func (m *tuiModel) handleIdleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cands = nil
 		return m, nil
 
-	// ↑/↓ and the Emacs Ctrl-P/Ctrl-N move through the completion menu (when
-	// open) or input history (when not).
+	// ↑/↓ move through an open completion menu. Ctrl-P/Ctrl-N do the same when
+	// it is open, or move through input history when it is not.
 	case tea.KeyUp, tea.KeyCtrlP:
 		m.idleUp()
 		return m, nil
@@ -949,7 +967,7 @@ func (m *tuiModel) footer() string {
 		b.WriteString("\n" + styleHint.Render("  interrupting keeps the conversation — add more and continue"))
 	default:
 		b.WriteString(box.Render(m.input.View()))
-		b.WriteString("\n" + styleHint.Render("  \"/\" commands  ·  \"@\" files  ·  ↑↓ history"))
+		b.WriteString("\n" + styleHint.Render("  \"/\" commands  ·  \"@\" files  ·  ↑↓ scroll  ·  Ctrl-P/N history"))
 	}
 	return b.String()
 }

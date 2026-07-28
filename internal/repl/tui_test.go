@@ -35,7 +35,7 @@ func TestScrollbackWritesAndNotifies(t *testing.T) {
 	}
 }
 
-func TestTUIProgramDoesNotEnableMouseReporting(t *testing.T) {
+func TestTUIProgramUsesAlternateScrollWithoutMouseReporting(t *testing.T) {
 	// Ctrl-C exits the program after startup, leaving the emitted terminal
 	// control sequences available for inspection.
 	r, _, output := newTestRepl(t, string([]byte{3}))
@@ -46,10 +46,34 @@ func TestTUIProgramDoesNotEnableMouseReporting(t *testing.T) {
 	if !bytes.Contains(output.Bytes(), []byte("\x1b[?1049h")) {
 		t.Fatal("TUI startup sequence was not captured")
 	}
+	for _, seq := range []string{"\x1b[?1007h", "\x1b[?1007l"} {
+		if !bytes.Contains(output.Bytes(), []byte(seq)) {
+			t.Errorf("TUI did not toggle alternate-scroll mode with %q", seq)
+		}
+	}
 	for _, seq := range []string{"\x1b[?1002h", "\x1b[?1003h", "\x1b[?1006h"} {
 		if bytes.Contains(output.Bytes(), []byte(seq)) {
 			t.Errorf("TUI enabled mouse reporting with %q; native text selection would be captured", seq)
 		}
+	}
+}
+
+func TestTUIArrowKeysScrollTranscriptWithoutCompletion(t *testing.T) {
+	m := newTestTUI(t)
+	m.sb.Write([]byte(strings.Repeat("line\n", 100)))
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	bottom := m.vp.YOffset
+	if bottom == 0 {
+		t.Fatal("test transcript does not overflow the viewport")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.vp.YOffset >= bottom {
+		t.Errorf("Up did not scroll transcript: offset = %d, want less than %d", m.vp.YOffset, bottom)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.vp.YOffset != bottom {
+		t.Errorf("Down did not scroll transcript back: offset = %d, want %d", m.vp.YOffset, bottom)
 	}
 }
 
@@ -64,7 +88,7 @@ func TestTUIRendersBoxAtBottom(t *testing.T) {
 	}
 	// The last non-empty content is the footer (box/hint), i.e. input is pinned
 	// at the bottom.
-	if !strings.Contains(view, "↑↓ history") {
+	if !strings.Contains(view, "↑↓ scroll") {
 		t.Errorf("expected the footer hint at the bottom:\n%s", view)
 	}
 }
