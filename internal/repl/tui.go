@@ -910,10 +910,28 @@ func (m *tuiModel) basePrompt() string {
 
 func (m *tuiModel) workingPrompt() string { return "> " }
 
-// layout sizes the viewport to fill everything above the footer.
+// layout sizes the managed viewport for only the unfinished streaming tail.
+// Finalized history already occupies real terminal rows above the program, so
+// reserving the rest of the screen here would cover it with blank space.
 func (m *tuiModel) layout() {
 	footer := lipgloss.Height(m.footer())
-	vpH := m.h - footer
+	maxH := m.h - footer
+	if maxH < 0 {
+		maxH = 0
+	}
+	vpH := 0
+	if m.live != "" {
+		width := m.w
+		if width < 1 {
+			width = 1
+		}
+		vpH = lipgloss.Height(ansi.Wrap(m.live, width, ""))
+		if vpH > maxH {
+			vpH = maxH
+		}
+	}
+	// Keep the viewport component internally valid; View omits it entirely
+	// when there is no live tail.
 	if vpH < 1 {
 		vpH = 1
 	}
@@ -961,8 +979,7 @@ func (m *tuiModel) refreshViewport() {
 		return
 	}
 	m.layout() // footer height can change (popup shown/hidden)
-	wrap := lipgloss.NewStyle().Width(m.vp.Width)
-	m.vp.SetContent(wrap.Render(m.live))
+	m.vp.SetContent(ansi.Wrap(m.live, m.vp.Width, ""))
 	m.vp.GotoBottom()
 }
 
@@ -1063,7 +1080,11 @@ func (m *tuiModel) View() string {
 	if m.stats != nil {
 		return m.stats.view(m.w)
 	}
-	return m.vp.View() + "\n" + m.footer()
+	footer := m.footer()
+	if m.live == "" {
+		return footer
+	}
+	return m.vp.View() + "\n" + footer
 }
 
 // truncPad truncates or right-pads s to n display columns.

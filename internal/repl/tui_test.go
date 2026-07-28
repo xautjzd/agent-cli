@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func newTestTUI(t *testing.T) *tuiModel {
@@ -110,7 +111,7 @@ func TestTUICommitsFinalizedTranscriptAndKeepsLiveTail(t *testing.T) {
 	}
 }
 
-func TestTUIRendersBoxAtBottom(t *testing.T) {
+func TestTUIRendersInputFooter(t *testing.T) {
 	m := newTestTUI(t)
 	// Simulate the initial sizing.
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -119,10 +120,20 @@ func TestTUIRendersBoxAtBottom(t *testing.T) {
 	if !strings.Contains(view, "╭") || !strings.Contains(view, "> ") {
 		t.Errorf("expected an input box in the view:\n%s", view)
 	}
-	// The last non-empty content is the footer (box/hint), i.e. input is pinned
-	// at the bottom.
+	// The last non-empty content is the footer.
 	if !strings.Contains(view, "mouse scroll/select") {
 		t.Errorf("expected the footer hint at the bottom:\n%s", view)
+	}
+}
+
+func TestTUIEmptyLiveViewportDoesNotHideNativeHistory(t *testing.T) {
+	m := newTestTUI(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+
+	viewHeight := lipgloss.Height(m.View())
+	footerHeight := lipgloss.Height(m.footer())
+	if viewHeight != footerHeight {
+		t.Fatalf("empty live viewport occupies %d rows; want footer-only height %d", viewHeight, footerHeight)
 	}
 }
 
