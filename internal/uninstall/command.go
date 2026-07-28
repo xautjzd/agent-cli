@@ -1,4 +1,4 @@
-package main
+package uninstall
 
 import (
 	"bufio"
@@ -6,40 +6,20 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strings"
-
-	"github.com/xautjzd/agent-cli/internal/home"
-	"github.com/xautjzd/agent-cli/internal/uninstall"
-	"github.com/xautjzd/agent-cli/internal/version"
 )
 
-func runUninstall(args []string) error {
-	if helpRequested(args) {
-		printSubcommandUsage(os.Stdout, "uninstall")
-		return nil
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate executable: %w", err)
-	}
-	return runUninstallWithIO(
-		args,
-		os.Stdin,
-		os.Stdout,
-		executable,
-		home.Dir(),
-		isTTY(os.Stdin),
-	)
-}
-
-func runUninstallWithIO(
+// Run parses the uninstall command, prompts when needed, and removes the
+// validated targets. Environment-specific paths and terminal state are passed
+// in by the CLI entry point so the command remains testable.
+func Run(
 	args []string,
 	in io.Reader,
 	out io.Writer,
 	executable string,
 	agentHome string,
 	interactive bool,
+	currentVersion string,
 ) error {
 	fs := flag.NewFlagSet("agent uninstall", flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -55,7 +35,7 @@ func runUninstallWithIO(
 		return fmt.Errorf("usage: agent uninstall [--purge] [--yes]")
 	}
 
-	remover, err := uninstall.New(executable, agentHome)
+	remover, err := New(executable, agentHome)
 	if err != nil {
 		return err
 	}
@@ -65,7 +45,7 @@ func runUninstallWithIO(
 			return fmt.Errorf("uninstall requires an interactive terminal; pass --yes to confirm")
 		}
 		if *purge {
-			printUninstallTargets(out, remover, true)
+			printUninstallTargets(out, remover, true, currentVersion)
 			confirmed, err := readConfirmation(in, out)
 			if err != nil {
 				return err
@@ -75,7 +55,7 @@ func runUninstallWithIO(
 				return nil
 			}
 		} else {
-			action, err := readUninstallChoice(in, out, remover)
+			action, err := readUninstallChoice(in, out, remover, currentVersion)
 			if err != nil {
 				return err
 			}
@@ -90,13 +70,13 @@ func runUninstallWithIO(
 			}
 		}
 	} else {
-		printUninstallTargets(out, remover, selectedPurge)
+		printUninstallTargets(out, remover, selectedPurge, currentVersion)
 	}
 
 	if err := remover.Remove(selectedPurge); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "\nRemoved agent-cli %s from %s.\n", version.Version, remover.Executable())
+	fmt.Fprintf(out, "\nRemoved agent-cli %s from %s.\n", currentVersion, remover.Executable())
 	if selectedPurge {
 		fmt.Fprintf(out, "Removed %s and %s.\n", remover.Config(), remover.Projects())
 		fmt.Fprintf(out, "Preserved all other data in %s.\n", remover.Home())
@@ -106,8 +86,8 @@ func runUninstallWithIO(
 	return nil
 }
 
-func readUninstallChoice(in io.Reader, out io.Writer, remover uninstall.Uninstaller) (int, error) {
-	fmt.Fprintf(out, "Uninstall agent-cli %s\n\n", version.Version)
+func readUninstallChoice(in io.Reader, out io.Writer, remover Uninstaller, currentVersion string) (int, error) {
+	fmt.Fprintf(out, "Uninstall agent-cli %s\n\n", currentVersion)
 	fmt.Fprintf(out, "Executable:\n  %s\n\n", remover.Executable())
 	fmt.Fprintln(out, "1. Uninstall and keep all user data")
 	fmt.Fprintln(out, "2. Uninstall and also remove:")
@@ -146,8 +126,8 @@ func readConfirmation(in io.Reader, out io.Writer) (bool, error) {
 	}
 }
 
-func printUninstallTargets(out io.Writer, remover uninstall.Uninstaller, purge bool) {
-	fmt.Fprintf(out, "Uninstall agent-cli %s\n\n", version.Version)
+func printUninstallTargets(out io.Writer, remover Uninstaller, purge bool, currentVersion string) {
+	fmt.Fprintf(out, "Uninstall agent-cli %s\n\n", currentVersion)
 	fmt.Fprintf(out, "Executable:\n  %s\n", remover.Executable())
 	if purge {
 		fmt.Fprintf(out, "Config:\n  %s\n", remover.Config())

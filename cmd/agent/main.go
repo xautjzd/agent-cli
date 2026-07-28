@@ -53,6 +53,7 @@ import (
 	"github.com/xautjzd/agent-cli/internal/subagent"
 	"github.com/xautjzd/agent-cli/internal/textwidth"
 	"github.com/xautjzd/agent-cli/internal/theme"
+	"github.com/xautjzd/agent-cli/internal/uninstall"
 	"github.com/xautjzd/agent-cli/internal/usage"
 	"github.com/xautjzd/agent-cli/internal/version"
 	"github.com/xautjzd/agent-cli/internal/webtool"
@@ -305,6 +306,26 @@ func run(args []string) error {
 		return runNonInteractive(ctx, sess, cfg, *prompt, *output, *quiet, *bypass)
 	}
 	return sess.Run(ctx)
+}
+
+func runUninstall(args []string) error {
+	if helpRequested(args) {
+		printSubcommandUsage(os.Stdout, "uninstall")
+		return nil
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate executable: %w", err)
+	}
+	return uninstall.Run(
+		args,
+		os.Stdin,
+		os.Stdout,
+		executable,
+		home.Dir(),
+		isTTY(os.Stdin),
+		version.Version,
+	)
 }
 
 // runNonInteractive executes one prompt and exits — the mode for PR review, CI,

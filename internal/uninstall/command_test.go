@@ -1,4 +1,4 @@
-package main
+package uninstall
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 func TestRunUninstallChoiceKeepsData(t *testing.T) {
 	executable, agentHome := testUninstallFiles(t)
 	var out bytes.Buffer
-	if err := runUninstallWithIO(nil, strings.NewReader("1\n"), &out, executable, agentHome, true); err != nil {
+	if err := Run(nil, strings.NewReader("1\n"), &out, executable, agentHome, true, "0.1.1"); err != nil {
 		t.Fatal(err)
 	}
 	assertUninstallMissing(t, executable)
@@ -25,7 +25,7 @@ func TestRunUninstallChoiceKeepsData(t *testing.T) {
 func TestRunUninstallChoicePurgesOnlySelectedData(t *testing.T) {
 	executable, agentHome := testUninstallFiles(t)
 	var out bytes.Buffer
-	if err := runUninstallWithIO(nil, strings.NewReader("2\n"), &out, executable, agentHome, true); err != nil {
+	if err := Run(nil, strings.NewReader("2\n"), &out, executable, agentHome, true, "0.1.1"); err != nil {
 		t.Fatal(err)
 	}
 	assertUninstallMissing(t, executable)
@@ -40,7 +40,7 @@ func TestRunUninstallChoicePurgesOnlySelectedData(t *testing.T) {
 func TestRunUninstallCancelLeavesEverything(t *testing.T) {
 	executable, agentHome := testUninstallFiles(t)
 	var out bytes.Buffer
-	if err := runUninstallWithIO(nil, strings.NewReader("3\n"), &out, executable, agentHome, true); err != nil {
+	if err := Run(nil, strings.NewReader("3\n"), &out, executable, agentHome, true, "0.1.1"); err != nil {
 		t.Fatal(err)
 	}
 	assertUninstallExists(t, executable)
@@ -53,7 +53,7 @@ func TestRunUninstallCancelLeavesEverything(t *testing.T) {
 func TestRunUninstallRequiresYesWithoutTTY(t *testing.T) {
 	executable, agentHome := testUninstallFiles(t)
 	var out bytes.Buffer
-	err := runUninstallWithIO(nil, strings.NewReader("1\n"), &out, executable, agentHome, false)
+	err := Run(nil, strings.NewReader("1\n"), &out, executable, agentHome, false, "0.1.1")
 	if err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Fatalf("error = %v, want --yes guidance", err)
 	}
@@ -63,13 +63,14 @@ func TestRunUninstallRequiresYesWithoutTTY(t *testing.T) {
 func TestRunUninstallPurgeYesDoesNotPrompt(t *testing.T) {
 	executable, agentHome := testUninstallFiles(t)
 	var out bytes.Buffer
-	if err := runUninstallWithIO(
+	if err := Run(
 		[]string{"--purge", "--yes"},
 		strings.NewReader(""),
 		&out,
 		executable,
 		agentHome,
 		false,
+		"0.1.1",
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -82,12 +83,12 @@ func TestRunUninstallPurgeYesDoesNotPrompt(t *testing.T) {
 func TestRunUninstallRejectsInvalidChoiceAndArguments(t *testing.T) {
 	executable, agentHome := testUninstallFiles(t)
 	var out bytes.Buffer
-	if err := runUninstallWithIO(nil, strings.NewReader("delete all\n"), &out, executable, agentHome, true); err == nil {
+	if err := Run(nil, strings.NewReader("delete all\n"), &out, executable, agentHome, true, "0.1.1"); err == nil {
 		t.Fatal("invalid choice must fail")
 	}
 	assertUninstallExists(t, executable)
 
-	if err := runUninstallWithIO([]string{"extra"}, strings.NewReader(""), &out, executable, agentHome, true); err == nil {
+	if err := Run([]string{"extra"}, strings.NewReader(""), &out, executable, agentHome, true, "0.1.1"); err == nil {
 		t.Fatal("positional arguments must fail")
 	}
 }
