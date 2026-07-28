@@ -9,6 +9,7 @@
 //	agent session list|show|rename|delete ...
 //	agent skill list|install|remove|show ...
 //	agent memory list|show|delete ...
+//	agent uninstall [--purge] [--yes]
 //	agent version
 //
 // "agent -h" prints the same list (see printUsage) plus every flag, and
@@ -113,6 +114,10 @@ var subcommands = []subcommand{
 		{"show <name>", "print one memory"},
 		{"delete <name>", "delete one memory"},
 	}},
+	{"uninstall", "[--purge] [--yes]", [][2]string{
+		{"--purge", "also remove config.json and the projects cache"},
+		{"--yes", "confirm without prompting"},
+	}},
 	{"version", "print the version and exit", nil},
 }
 
@@ -196,6 +201,8 @@ func run(args []string) error {
 			return runConfig(args[1:])
 		case "provider":
 			return runProvider(args[1:])
+		case "uninstall":
+			return runUninstall(args[1:])
 		case "version":
 			if helpRequested(args[1:]) {
 				printSubcommandUsage(os.Stdout, "version")
