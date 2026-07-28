@@ -6,7 +6,7 @@
   - Verify: `go test ./internal/update -run 'Version|Latest'`
   - Files: `internal/update/check.go`, `internal/update/check_test.go`
 
-- [ ] Implement checksum-verified atomic installation.
+- [x] Implement checksum-verified atomic installation.
   - Acceptance: the correct platform archive is bounded, checksum verified,
     path-safe, extracted to the executable directory, and atomically installed
     without losing the old binary on failure.
