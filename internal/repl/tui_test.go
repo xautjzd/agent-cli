@@ -35,7 +35,7 @@ func TestScrollbackWritesAndNotifies(t *testing.T) {
 	}
 }
 
-func TestTUIProgramUsesAlternateScrollWithoutMouseReporting(t *testing.T) {
+func TestTUIProgramUsesNativeScrollbackWithoutMouseReporting(t *testing.T) {
 	// Ctrl-C exits the program after startup, leaving the emitted terminal
 	// control sequences available for inspection.
 	r, _, output := newTestRepl(t, string([]byte{3}))
@@ -43,37 +43,70 @@ func TestTUIProgramUsesAlternateScrollWithoutMouseReporting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !bytes.Contains(output.Bytes(), []byte("\x1b[?1049h")) {
-		t.Fatal("TUI startup sequence was not captured")
-	}
-	for _, seq := range []string{"\x1b[?1007h", "\x1b[?1007l"} {
-		if !bytes.Contains(output.Bytes(), []byte(seq)) {
-			t.Errorf("TUI did not toggle alternate-scroll mode with %q", seq)
-		}
-	}
-	for _, seq := range []string{"\x1b[?1002h", "\x1b[?1003h", "\x1b[?1006h"} {
+	for _, seq := range []string{
+		"\x1b[?1049h", "\x1b[?1007h", "\x1b[?1007l",
+		"\x1b[?1002h", "\x1b[?1003h", "\x1b[?1006h",
+	} {
 		if bytes.Contains(output.Bytes(), []byte(seq)) {
-			t.Errorf("TUI enabled mouse reporting with %q; native text selection would be captured", seq)
+			t.Errorf("TUI emitted %q; native scrollback or text selection would be captured", seq)
 		}
 	}
 }
 
-func TestTUIArrowKeysScrollTranscriptWithoutCompletion(t *testing.T) {
-	m := newTestTUI(t)
-	m.sb.Write([]byte(strings.Repeat("line\n", 100)))
-	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+func TestScrollbackDrainsOnlyFinalizedLines(t *testing.T) {
+	sb := &scrollback{}
+	sb.Write([]byte("first\npartial"))
+	finalized, live, _, ok := sb.DrainFinalized()
+	if !ok {
+		t.Fatal("first drain did not report a finalized line")
+	}
+	if finalized != "first" || live != "partial" {
+		t.Fatalf("first drain = (%q, %q), want (%q, %q)", finalized, live, "first", "partial")
+	}
+	sb.Write([]byte(" line\nsecond\n"))
+	finalized, live, _, ok = sb.DrainFinalized()
+	if !ok {
+		t.Fatal("second drain did not report finalized lines")
+	}
+	if finalized != "partial line\nsecond" || live != "" {
+		t.Fatalf("second drain = (%q, %q), want (%q, %q)", finalized, live, "partial line\nsecond", "")
+	}
+	sb.Write([]byte("\n"))
+	finalized, live, _, ok = sb.DrainFinalized()
+	if !ok || finalized != "" || live != "" {
+		t.Fatalf("blank-line drain = (%q, %q, %v), want empty finalized line", finalized, live, ok)
+	}
+}
 
-	bottom := m.vp.YOffset
-	if bottom == 0 {
-		t.Fatal("test transcript does not overflow the viewport")
+func TestTUITranscriptResetRequestsNativeScrollbackRebuild(t *testing.T) {
+	m := newTestTUI(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.sb.Write([]byte("old\n"))
+	m.Update(refreshMsg{})
+
+	m.sb.Reset()
+	_, cmd := m.Update(refreshMsg{})
+	if cmd == nil {
+		t.Fatal("transcript reset should produce a terminal scrollback purge command")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	if m.vp.YOffset >= bottom {
-		t.Errorf("Up did not scroll transcript: offset = %d, want less than %d", m.vp.YOffset, bottom)
+	if m.scrollbackGeneration != 1 {
+		t.Fatalf("scrollback generation = %d, want 1", m.scrollbackGeneration)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if m.vp.YOffset != bottom {
-		t.Errorf("Down did not scroll transcript back: offset = %d, want %d", m.vp.YOffset, bottom)
+}
+
+func TestTUICommitsFinalizedTranscriptAndKeepsLiveTail(t *testing.T) {
+	m := newTestTUI(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.sb.Write([]byte("committed\nstreaming"))
+	_, cmd := m.Update(refreshMsg{})
+	if cmd == nil {
+		t.Fatal("finalized transcript should produce a terminal print command")
+	}
+	if m.live != "streaming" {
+		t.Fatalf("live tail = %q, want %q", m.live, "streaming")
+	}
+	if got := m.vp.View(); !strings.Contains(got, "streaming") || strings.Contains(got, "committed") {
+		t.Errorf("viewport should contain only live tail:\n%s", got)
 	}
 }
 
@@ -88,7 +121,7 @@ func TestTUIRendersBoxAtBottom(t *testing.T) {
 	}
 	// The last non-empty content is the footer (box/hint), i.e. input is pinned
 	// at the bottom.
-	if !strings.Contains(view, "↑↓ scroll") {
+	if !strings.Contains(view, "mouse scroll/select") {
 		t.Errorf("expected the footer hint at the bottom:\n%s", view)
 	}
 }
@@ -101,7 +134,7 @@ func TestTUIResizeIsClean(t *testing.T) {
 	view := m.View()
 	for _, line := range strings.Split(view, "\n") {
 		if w := lineWidth(line); w > 70 {
-				t.Errorf("line exceeds new width 70 (=%d): %q", w, line)
+			t.Errorf("line exceeds new width 70 (=%d): %q", w, line)
 		}
 	}
 }

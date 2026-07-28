@@ -15,31 +15,36 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/xautjzd/agent-cli/internal/provider"
 	"github.com/xautjzd/agent-cli/internal/theme"
 	"github.com/xautjzd/agent-cli/internal/version"
 )
 
-// Full-screen interactive UI. Unlike the per-line inline editor (which the
-// terminal reflows on resize, leaving stacked ghost frames), this is a single
-// persistent bubbletea program in the alternate screen: a scrolling
-// conversation viewport on top and a bottom-pinned input. Because it owns the
-// whole viewport, a resize triggers one clean full repaint — no artifacts, the
-// input stays pinned at the bottom, and history stays visible and scrollable.
+// Interactive inline UI. Finalized conversation lines are printed above the
+// Bubble Tea viewport into the terminal's native scrollback, while only the
+// current unfinished line and the bottom-pinned input remain managed by the
+// renderer. This is the same split used by Codex: the terminal/tmux owns
+// scrolling and text selection, so both work without enabling mouse reporting.
 //
-// It reuses the existing command/turn logic: output is routed to an in-memory
-// scrollback that the viewport renders, and mid-turn prompts (permission
-// confirmations, numbered pickers) are serviced by the running program via
-// r.tuiAsk, so no nested program is ever needed.
+// It reuses the existing command/turn logic: output is routed through an
+// in-memory transcript buffer before finalized lines are emitted, and mid-turn
+// prompts (permission confirmations, numbered pickers) are serviced by the
+// running program via r.tuiAsk, so no nested program is ever needed.
 
-// scrollback is the thread-safe text buffer the viewport renders. Both the
-// command output (r.Out) and the agent event sink write to it; every write
-// notifies the program so the viewport refreshes live (streaming output).
+// scrollback is the thread-safe transcript buffer. Both command output (r.Out)
+// and the agent event sink write to it; every write notifies the program so
+// complete lines can move to terminal history and streaming tails redraw live.
 type scrollback struct {
-	mu     sync.Mutex
-	buf    strings.Builder
-	notify func()
+	mu  sync.Mutex
+	buf strings.Builder
+	// committed is the byte offset through buf already emitted into terminal
+	// scrollback. Bytes after it remain in the live Bubble Tea viewport until
+	// a newline finalizes them.
+	committed  int
+	generation uint64
+	notify     func()
 }
 
 func (s *scrollback) Write(p []byte) (int, error) {
@@ -58,11 +63,34 @@ func (s *scrollback) String() string {
 	return s.buf.String()
 }
 
+// DrainFinalized returns complete, not-yet-emitted lines plus the unfinished
+// tail that should remain in the managed viewport.
+func (s *scrollback) DrainFinalized() (finalized string, tail string, generation uint64, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	content := s.buf.String()
+	generation = s.generation
+	if s.committed > len(content) {
+		s.committed = 0
+	}
+	pending := content[s.committed:]
+	end := strings.LastIndexByte(pending, '\n')
+	if end < 0 {
+		return "", pending, generation, false
+	}
+	finalized = pending[:end]
+	s.committed += end + 1
+	return finalized, content[s.committed:], generation, true
+}
+
 // Reset clears the buffer so the transcript can be reprinted from scratch
 // (used when /theme re-colors the whole session).
 func (s *scrollback) Reset() {
 	s.mu.Lock()
 	s.buf.Reset()
+	s.committed = 0
+	s.generation++
 	s.mu.Unlock()
 	if s.notify != nil {
 		s.notify()
@@ -78,7 +106,8 @@ type escExpireMsg struct{}           // the double-Esc arm window elapsed
 // escWindow is how long after a first Esc a second Esc still counts as the
 // double-tap that interrupts a running turn.
 const escWindow = time.Second
-type askMsg struct {                 // a mid-turn text prompt needs answering
+
+type askMsg struct { // a mid-turn text prompt needs answering
 	prompt string
 	secret bool // mask the input (API keys, passwords)
 	reply  chan tuiReply
@@ -127,10 +156,12 @@ type tuiModel struct {
 	program *tea.Program
 	sb      *scrollback
 
-	vp    viewport.Model
-	input textinput.Model
-	ready bool // first WindowSizeMsg received
-	w, h  int
+	vp                   viewport.Model
+	input                textinput.Model
+	live                 string // unfinished output not yet committed to terminal scrollback
+	scrollbackGeneration uint64
+	ready                bool // first WindowSizeMsg received
+	w, h                 int
 
 	busy       bool               // a turn is running
 	turnCancel context.CancelFunc // cancels the running turn (Ctrl-C)
@@ -281,11 +312,10 @@ func (r *Repl) runTUI(ctx context.Context) error {
 		input: ti,
 	}
 
-	// Deliberately leave Bubble Tea's mouse reporting disabled. Enabling cell
-	// motion makes the terminal send drag events to the application, which
-	// prevents users from selecting transcript text with the mouse.
-	p := tea.NewProgram(m, tea.WithAltScreen(),
-		tea.WithInput(r.In), tea.WithOutput(realOut))
+	// Inline mode is essential here: tea.Println can persist finalized output
+	// above the managed viewport only on the normal screen. Mouse reporting
+	// remains disabled so drag selection stays native.
+	p := tea.NewProgram(m, tea.WithInput(r.In), tea.WithOutput(realOut))
 	m.program = p
 
 	// Seed the banner while notify is still nil, so it does not try to Send to
@@ -317,14 +347,6 @@ func (r *Repl) runTUI(ctx context.Context) error {
 		r.tuiSelectPreview = nil
 		r.tuiStats = nil
 	}()
-
-	// DEC alternate-scroll mode translates wheel/trackpad gestures into
-	// cursor-key input while the alternate screen is active. Unlike mouse
-	// reporting, it leaves drag selection under the terminal's control.
-	if _, err := io.WriteString(realOut, "\x1b[?1007h"); err != nil {
-		return err
-	}
-	defer func() { _, _ = io.WriteString(realOut, "\x1b[?1007l") }()
 
 	_, err := p.Run()
 	return err
@@ -382,12 +404,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// otherwise not render until the next refresh (the user's first input).
 		m.ready = true
 		m.layout()
-		m.refreshViewport()
-		return m, nil
+		return m, m.commitFinalized()
 
 	case refreshMsg:
-		m.refreshViewport()
-		return m, nil
+		return m, m.commitFinalized()
 
 	case escExpireMsg:
 		// The double-Esc window elapsed without a second tap: disarm so the
@@ -444,7 +464,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	}
 
-	// Forward other messages (mouse, etc.) to the viewport for scrolling.
+	// Forward renderer/component messages to the live viewport. Mouse events
+	// are not received because mouse reporting is deliberately disabled.
 	var cmd tea.Cmd
 	m.vp, cmd = m.vp.Update(msg)
 	return m, cmd
@@ -461,24 +482,6 @@ func (m *tuiModel) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// The stats overview captures all keys until closed.
 	if m.stats != nil {
 		return m.handleStatsKey(key)
-	}
-
-	// Scrolling works in every other mode. With DEC alternate-scroll enabled,
-	// wheel and trackpad gestures arrive as Up/Down key messages.
-	switch key.Type {
-	case tea.KeyPgUp, tea.KeyPgDown, tea.KeyCtrlU, tea.KeyCtrlD:
-		var cmd tea.Cmd
-		m.vp, cmd = m.vp.Update(key)
-		return m, cmd
-	case tea.KeyUp, tea.KeyDown:
-		// Arrow keys still navigate an open completion menu. Otherwise they
-		// scroll the transcript, including while a turn or prompt is active.
-		if !m.busy && m.ask == nil && len(m.cands) > 0 {
-			break
-		}
-		var cmd tea.Cmd
-		m.vp, cmd = m.vp.Update(key)
-		return m, cmd
 	}
 
 	if m.ask != nil {
@@ -922,15 +925,44 @@ func (m *tuiModel) layout() {
 	}
 }
 
-// refreshViewport re-wraps the scrollback to the current width and shows it,
-// keeping the view pinned to the newest output.
+// commitFinalized moves complete output lines into native terminal scrollback
+// and keeps only an unfinished streaming tail in the managed viewport.
+func (m *tuiModel) commitFinalized() tea.Cmd {
+	finalized, live, generation, ok := m.sb.DrainFinalized()
+	m.live = live
+	m.refreshViewport()
+	reset := generation != m.scrollbackGeneration
+	m.scrollbackGeneration = generation
+	if !ok && !reset {
+		return nil
+	}
+
+	payload := finalized
+	if reset {
+		// Transcript rebuilds (for example a live /theme preview) must replace,
+		// not duplicate, previously committed terminal history. DECSED 3 is
+		// the same scrollback purge Codex uses before replaying its transcript.
+		payload = "\x1b[3J" + payload
+	}
+
+	// Bubble Tea counts each printed line as one terminal row. Pre-wrapping
+	// prevents a long logical line from soft-wrapping behind its cursor math.
+	width := m.w
+	if width < 1 {
+		width = 1
+	}
+	wrapped := ansi.Wrap(payload, width, "")
+	return tea.Printf("%s", wrapped)
+}
+
+// refreshViewport wraps the unfinished live tail and pins it above the footer.
 func (m *tuiModel) refreshViewport() {
 	if !m.ready {
 		return
 	}
 	m.layout() // footer height can change (popup shown/hidden)
 	wrap := lipgloss.NewStyle().Width(m.vp.Width)
-	m.vp.SetContent(wrap.Render(strings.TrimRight(m.sb.String(), "\n")))
+	m.vp.SetContent(wrap.Render(m.live))
 	m.vp.GotoBottom()
 }
 
@@ -967,7 +999,7 @@ func (m *tuiModel) footer() string {
 		b.WriteString("\n" + styleHint.Render("  interrupting keeps the conversation — add more and continue"))
 	default:
 		b.WriteString(box.Render(m.input.View()))
-		b.WriteString("\n" + styleHint.Render("  \"/\" commands  ·  \"@\" files  ·  ↑↓ scroll  ·  Ctrl-P/N history"))
+		b.WriteString("\n" + styleHint.Render("  \"/\" commands · \"@\" files · mouse scroll/select · Ctrl-P/N history"))
 	}
 	return b.String()
 }
