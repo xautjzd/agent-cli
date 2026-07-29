@@ -142,6 +142,12 @@ func TestPromptModelIgnoresNumberKeys(t *testing.T) {
 }
 
 func TestPromptViewHasKeyboardInstructionsWithoutNumbers(t *testing.T) {
+	originalProfile := theme.ActiveProfile()
+	originalTheme := theme.Current().Name
+	t.Cleanup(func() {
+		theme.SetColorProfile(originalProfile)
+		theme.Set(originalTheme)
+	})
 	theme.SetColorProfile(termenv.Ascii)
 	executable, agentHome := testUninstallFiles(t)
 	remover, err := New(executable, agentHome)
@@ -151,8 +157,8 @@ func TestPromptViewHasKeyboardInstructionsWithoutNumbers(t *testing.T) {
 	view := newPromptModel(remover, false, "0.1.1").View()
 	for _, want := range []string{
 		"Uninstall agent-cli 0.1.1",
-		"Uninstall and keep all user data",
-		"Uninstall and remove config + project cache",
+		"Uninstall and keep user data",
+		"Uninstall and remove user data",
 		"↑↓ select · enter confirm · esc cancel",
 	} {
 		if !strings.Contains(view, want) {
@@ -164,6 +170,31 @@ func TestPromptViewHasKeyboardInstructionsWithoutNumbers(t *testing.T) {
 	}
 	if strings.Contains(view, "Choose 1") {
 		t.Errorf("prompt asks for a numeric choice:\n%s", view)
+	}
+	for _, hidden := range []string{remover.Config(), remover.Projects()} {
+		if strings.Contains(view, hidden) {
+			t.Errorf("prompt exposes cleanup path %q:\n%s", hidden, view)
+		}
+	}
+}
+
+func TestPromptHighlightsArrowWithSelectedOption(t *testing.T) {
+	originalProfile := theme.ActiveProfile()
+	originalTheme := theme.Current().Name
+	t.Cleanup(func() {
+		theme.SetColorProfile(originalProfile)
+		theme.Set(originalTheme)
+	})
+	theme.SetColorProfile(termenv.TrueColor)
+	executable, agentHome := testUninstallFiles(t)
+	remover, err := New(executable, agentHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := newPromptModel(remover, false, "0.1.1").View()
+	want := theme.Current().Accent + "› Uninstall and keep user data"
+	if !strings.Contains(view, want) {
+		t.Errorf("selection arrow is not part of highlighted line:\n%s", view)
 	}
 }
 

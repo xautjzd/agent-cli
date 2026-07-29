@@ -165,29 +165,20 @@ func (m *promptModel) View() string {
 
 	var options []string
 	if m.purgeOnly {
-		fmt.Fprintf(&b, "%s\n  %s\n  %s\n\n",
-			th.Paint(th.Muted, "Also remove:"),
-			m.remover.Config(),
-			m.remover.Projects(),
-		)
-		options = []string{"Continue", "Cancel"}
+		options = []string{"Uninstall and remove user data", "Cancel"}
 	} else {
 		options = []string{
-			"Uninstall and keep all user data",
-			"Uninstall and remove config + project cache",
+			"Uninstall and keep user data",
+			"Uninstall and remove user data",
 			"Cancel",
 		}
 	}
 	for i, option := range options {
-		prefix := "  "
+		line := "  " + option
 		if i == m.selected {
-			prefix = "› "
-			option = th.Paint(th.Accent, option)
+			line = th.Paint(th.Accent, "› "+option)
 		}
-		fmt.Fprintln(&b, prefix+option)
-		if !m.purgeOnly && i == int(ChoicePurge) {
-			fmt.Fprintf(&b, "    %s\n    %s\n", m.remover.Config(), m.remover.Projects())
-		}
+		fmt.Fprintln(&b, line)
 	}
 	fmt.Fprint(&b, "\n"+th.Paint(th.Muted, "↑↓ select · enter confirm · esc cancel"))
 	return b.String()
