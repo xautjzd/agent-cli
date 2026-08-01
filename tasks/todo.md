@@ -16,7 +16,7 @@
   - Files: `internal/auth/openai/adapter.go`, `internal/auth/openai/oauth.go`,
     `internal/auth/openai/usage.go`, `internal/auth/openai/openai_test.go`
 
-- [ ] Implement the ChatGPT Codex Responses provider.
+- [x] Implement the ChatGPT Codex Responses provider.
   - Acceptance: OAuth-resolved OpenAI requests support streamed text, reasoning,
     tools, tool results, images, usage, cancellation, and bounded errors while
     the API-key Chat Completions path remains unchanged.
