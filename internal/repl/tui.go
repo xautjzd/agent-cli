@@ -121,6 +121,7 @@ type refreshMsg struct{}             // scrollback changed; re-render the viewpo
 type turnDoneMsg struct{ done bool } // a turn finished (done => quit)
 type escExpireMsg struct{}           // the double-Esc arm window elapsed
 type resizeRepaintMsg struct{ serial uint64 }
+type workingTickMsg struct{ started time.Time } // refreshes in-flight token estimate
 
 // escWindow is how long after a first Esc a second Esc still counts as the
 // double-tap that interrupts a running turn.
@@ -130,6 +131,15 @@ const escWindow = time.Second
 // terminal edge is being dragged. Layout still updates immediately; only the
 // full scrollback replay waits for the width to settle.
 const resizeRepaintDelay = 50 * time.Millisecond
+
+// workingTickInterval keeps the status visibly alive even while a provider is
+// waiting or thinking without streaming output. Providers report authoritative
+// usage only after a request finishes, so the in-flight counter is marked as an
+// estimate and advances at a conservative generation rate.
+const (
+	workingTickInterval      = 250 * time.Millisecond
+	estimatedTokensPerSecond = 8
+)
 
 // transcriptResetSequence clears the active screen, homes the cursor, and
 // purges the terminal's saved scrollback before a rebuilt transcript is
@@ -193,8 +203,11 @@ type tuiModel struct {
 	w, h                 int
 	resizeSerial         uint64
 
-	busy       bool               // a turn is running
-	turnCancel context.CancelFunc // cancels the running turn (Ctrl-C)
+	busy          bool               // a turn is running
+	turnCancel    context.CancelFunc // cancels the running turn (Ctrl-C)
+	workingSince  time.Time          // identifies the active heartbeat sequence
+	workingBase   int                // estimated prompt/context tokens at submit
+	workingTokens int                // live estimated tokens consumed by this turn
 
 	// escArmed is set after the first Esc during a running turn: the next Esc
 	// within escWindow interrupts it (double-Esc to abort, like the mainstream
@@ -300,6 +313,20 @@ func abbrevTokens(n int) string {
 	default:
 		return fmt.Sprintf("%d", n)
 	}
+}
+
+// estimateTextTokens provides a cheap UI-only seed until the provider returns
+// authoritative usage. Four UTF-8 bytes per token is a reasonable cross-script
+// approximation; non-empty input always accounts for at least one token.
+func estimateTextTokens(text string) int {
+	if text == "" {
+		return 0
+	}
+	n := (len(text) + 3) / 4
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 // abbrevHome shortens a path under the user's home directory to a leading "~",
@@ -425,6 +452,12 @@ func (m *tuiModel) requestStats(data statsData) {
 
 func (m *tuiModel) Init() tea.Cmd { return textinput.Blink }
 
+func workingTick(started time.Time) tea.Cmd {
+	return tea.Tick(workingTickInterval, func(time.Time) tea.Msg {
+		return workingTickMsg{started: started}
+	})
+}
+
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -471,6 +504,18 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case workingTickMsg:
+		// Ignore a heartbeat left over from a completed/previous turn. While the
+		// active turn has no output this still repaints the status and advances
+		// its estimated token consumption, making forward progress visible.
+		if !m.busy || msg.started != m.workingSince {
+			return m, nil
+		}
+		generated := int(time.Since(m.workingSince).Seconds() * estimatedTokensPerSecond)
+		m.workingTokens = m.workingBase + generated
+		m.refreshViewport()
+		return m, workingTick(m.workingSince)
+
 	case askMsg:
 		// A mid-turn prompt: focus a fresh answer field at the bottom, masking
 		// the echo for secrets (API keys).
@@ -500,6 +545,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case turnDoneMsg:
 		m.busy = false
 		m.turnCancel = nil
+		m.workingSince = time.Time{}
+		m.workingBase = 0
+		m.workingTokens = 0
 		m.escArmed = false
 		m.input.Prompt = m.basePrompt()
 		m.input.Focus()
@@ -713,13 +761,16 @@ func (m *tuiModel) handleAskKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ask = nil
 		m.input.SetValue("")
 		m.input.EchoMode = textinput.EchoNormal
-		m.input.Prompt = m.workingPrompt()
+		m.input.Prompt = m.basePrompt()
+		m.input.Blur()
 		return m, nil
 	case tea.KeyCtrlC:
 		m.ask.reply <- tuiReply{ok: false}
 		m.ask = nil
 		m.input.SetValue("")
 		m.input.EchoMode = textinput.EchoNormal
+		m.input.Prompt = m.basePrompt()
+		m.input.Blur()
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -832,14 +883,23 @@ func (m *tuiModel) submit() (tea.Model, tea.Cmd) {
 	m.input.SetValue("")
 	m.cands = nil
 	m.busy = true
-	m.input.Prompt = m.workingPrompt()
+	m.input.Prompt = m.basePrompt()
+	m.input.Blur()
+	m.workingSince = time.Now()
+	// The provider only returns exact usage at completion. Seed the visible
+	// estimate with the latest known context plus this input, then let the
+	// heartbeat advance it while the request is in flight.
+	_, _, contextTokens := m.repl.Agent.Stats()
+	m.workingBase = contextTokens + estimateTextTokens(line)
+	m.workingTokens = m.workingBase
 
 	tctx, cancel := context.WithCancel(m.ctx)
 	m.turnCancel = cancel
-	return m, func() tea.Msg {
+	turn := func() tea.Msg {
 		done := m.repl.handleLine(tctx, line)
 		return turnDoneMsg{done: done}
 	}
+	return m, tea.Batch(turn, workingTick(m.workingSince))
 }
 
 // --- completion (reuses the inline editor's helpers) ------------------------
@@ -962,8 +1022,6 @@ func (m *tuiModel) basePrompt() string {
 	return "> "
 }
 
-func (m *tuiModel) workingPrompt() string { return "> " }
-
 // resizeInput keeps the text input's own horizontal viewport inside the
 // bordered footer. The box width alone is not enough: textinput otherwise
 // retains its previous/default width after a WindowSizeMsg.
@@ -1052,8 +1110,9 @@ func (m *tuiModel) refreshViewport() {
 	m.vp.GotoBottom()
 }
 
-// footer renders the bottom region: completion popup (if any) above the input
-// box, or the working indicator while a turn runs.
+// footer renders the bottom region: completion popup (if any), the live
+// working/token status, and the input box. The working status stays above the
+// box so the input itself remains visually stable while a turn runs.
 func (m *tuiModel) footer() string {
 	width := m.boxWidth()
 
@@ -1077,11 +1136,14 @@ func (m *tuiModel) footer() string {
 	case m.ask != nil:
 		b.WriteString(box.Render(m.input.View()))
 	case m.busy:
-		hint := "working… (esc esc or Ctrl-C to interrupt)"
+		status := fmt.Sprintf("  ✻ working… · ~%s tokens consumed", formatNumber(m.workingTokens))
 		if m.escArmed {
-			hint = "working… (press esc again to interrupt)"
+			status += " · press esc again to interrupt"
+		} else {
+			status += " · esc esc or Ctrl-C to interrupt"
 		}
-		b.WriteString(box.Render(styleWorking.Render(hint)))
+		b.WriteString(styleWorking.Render(status) + "\n")
+		b.WriteString(box.Render(m.input.View()))
 		b.WriteString("\n" + styleHint.Render("  interrupting keeps the conversation — add more and continue"))
 	default:
 		b.WriteString(box.Render(m.input.View()))

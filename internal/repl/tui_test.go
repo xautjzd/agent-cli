@@ -237,6 +237,44 @@ func TestTUISubmitStartsTurn(t *testing.T) {
 	}
 }
 
+func TestTUIWorkingStatusIsAboveInputWithTokens(t *testing.T) {
+	m := newTestTUI(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.busy = true
+	m.workingTokens = 1234
+	m.input.Blur()
+
+	view := stripANSI(m.View())
+	status := strings.Index(view, "working… · ~1,234 tokens consumed")
+	box := strings.Index(view, "╭")
+	if status < 0 || box < 0 {
+		t.Fatalf("working status or input box missing:\n%s", view)
+	}
+	if status > box {
+		t.Fatalf("working status must be above, not inside, the input box:\n%s", view)
+	}
+	if !strings.Contains(view[box:], "> ") {
+		t.Fatalf("busy state should retain the normal input prompt:\n%s", view)
+	}
+}
+
+func TestTUIWorkingTokenEstimateAdvancesWithoutOutput(t *testing.T) {
+	m := newTestTUI(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.busy = true
+	m.workingSince = time.Now().Add(-2 * time.Second)
+	m.workingBase = 10
+	m.workingTokens = 10
+
+	_, cmd := m.Update(workingTickMsg{started: m.workingSince})
+	if m.workingTokens < 10+2*estimatedTokensPerSecond {
+		t.Fatalf("working tokens = %d; counter did not advance", m.workingTokens)
+	}
+	if cmd == nil {
+		t.Fatal("active working tick should schedule the next heartbeat")
+	}
+}
+
 func TestTUIAskModalRoundTrip(t *testing.T) {
 	m := newTestTUI(t)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
