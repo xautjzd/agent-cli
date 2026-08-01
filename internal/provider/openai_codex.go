@@ -18,6 +18,15 @@ const (
 	maxCodexSSEEvent   = 4 << 20
 )
 
+var openAISubscriptionModels = []ModelInfo{
+	{ID: "gpt-5.6-sol", Name: "Latest frontier agentic coding model."},
+	{ID: "gpt-5.6-terra", Name: "Balanced agentic coding model for everyday work."},
+	{ID: "gpt-5.6-luna", Name: "Fast and affordable agentic coding model."},
+	{ID: "gpt-5.5", Name: "Frontier model for complex coding, research, and real-world work."},
+	{ID: "gpt-5.4", Name: "Strong model for everyday coding."},
+	{ID: "gpt-5.4-mini", Name: "Small, fast, and cost-efficient model for simpler coding tasks."},
+}
+
 // openAICodex implements the ChatGPT subscription Responses protocol. It is a
 // separate wire adapter from openAICompatible even though both report the
 // stable provider name "openai".
@@ -49,6 +58,30 @@ func NewOpenAICodex(source AuthSource, cfg Config) (Provider, error) {
 }
 
 func (p *openAICodex) Name() string { return "openai" }
+
+// Models returns the model IDs accepted by the ChatGPT subscription transport.
+// The API-key transport intentionally continues to use the broader OpenAI API
+// catalog because the two products have different model entitlements.
+func (*openAICodex) Models(context.Context) ([]ModelInfo, error) {
+	return append([]ModelInfo(nil), openAISubscriptionModels...), nil
+}
+
+func supportsOpenAISubscriptionModel(model string) bool {
+	for _, available := range openAISubscriptionModels {
+		if model == available.ID {
+			return true
+		}
+	}
+	return false
+}
+
+func openAISubscriptionModelIDs() []string {
+	ids := make([]string, len(openAISubscriptionModels))
+	for i, model := range openAISubscriptionModels {
+		ids[i] = model.ID
+	}
+	return ids
+}
 
 type codexRequest struct {
 	Model             string          `json:"model"`
@@ -177,6 +210,9 @@ func (p *openAICodex) ChatStream(ctx context.Context, req Request, onDelta func(
 	}
 	if resolved.Token == "" || resolved.AccountID == "" {
 		return nil, fmt.Errorf("OpenAI subscription authentication is incomplete; run auth login openai")
+	}
+	if !supportsOpenAISubscriptionModel(req.Model) {
+		return nil, fmt.Errorf("OpenAI subscription model %q is not supported; choose one of: %s", req.Model, strings.Join(openAISubscriptionModelIDs(), ", "))
 	}
 	body, err := json.Marshal(buildCodexRequest(req, p.effort))
 	if err != nil {

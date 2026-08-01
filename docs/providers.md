@@ -46,6 +46,11 @@ written to project config, sessions, prompts, usage history, or logs. OpenAI
 subscription tokens are sent only to OpenAI's official endpoint; setting a custom
 `base_url` requires its own explicit credential.
 
+The ChatGPT subscription transport currently offers `gpt-5.6-sol`,
+`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, and `gpt-5.4-mini`.
+After managed login, `/model` treats this subscription list as authoritative;
+the broader OpenAI API catalog remains available only when using an API key.
+
 GitHub Copilot login uses GitHub's official Copilot SDK and consumes the signed-in
 account's Copilot subscription allowance. The recommended `github_cli` method reads
 the credential from `gh` only when a request is made and does not copy it into the

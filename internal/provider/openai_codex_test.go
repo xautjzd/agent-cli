@@ -56,7 +56,7 @@ func TestOpenAICodexStreamsTextReasoningToolsAndUsage(t *testing.T) {
 	streamer := p.(Streamer)
 	var deltas []Delta
 	resp, err := streamer.ChatStream(context.Background(), Request{
-		Model: "gpt-test",
+		Model: "gpt-5.4-mini",
 		Messages: []Message{
 			{Role: RoleSystem, Content: "system"},
 			{Role: RoleUser, Content: "question"},
@@ -117,9 +117,37 @@ func TestOpenAICodexAuthAndHTTPFailuresAreSafe(t *testing.T) {
 	}
 	p.(*openAICodex).baseURL = server.URL
 	p.(*openAICodex).client = server.Client()
-	_, err = p.Chat(context.Background(), Request{})
+	_, err = p.Chat(context.Background(), Request{Model: "gpt-5.4"})
 	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "unauthorized") {
 		t.Fatalf("unsafe HTTP error = %v", err)
+	}
+}
+
+func TestOpenAICodexListsAndEnforcesSubscriptionModels(t *testing.T) {
+	p, err := NewOpenAICodex(staticAuthSource{auth: RequestAuth{Token: "token", AccountID: "account"}}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lister, ok := p.(ModelLister)
+	if !ok {
+		t.Fatal("OpenAI subscription provider does not expose its model catalog")
+	}
+	models, err := lister.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"}
+	if len(models) != len(want) {
+		t.Fatalf("models = %#v", models)
+	}
+	for i := range want {
+		if models[i].ID != want[i] {
+			t.Fatalf("models[%d] = %q; want %q", i, models[i].ID, want[i])
+		}
+	}
+	_, err = p.Chat(context.Background(), Request{Model: "gpt-5.5-pro"})
+	if err == nil || !strings.Contains(err.Error(), "not supported") || !strings.Contains(err.Error(), "gpt-5.4-mini") {
+		t.Fatalf("unsupported model error = %v", err)
 	}
 }
 

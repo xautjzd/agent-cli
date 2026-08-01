@@ -580,7 +580,7 @@ func (*dynamicModelProvider) Models(context.Context) ([]provider.ModelInfo, erro
 	}, nil
 }
 
-func TestModelCompletionUsesAuthenticatedProviderCatalog(t *testing.T) {
+func TestModelCompletionUsesAuthenticatedProviderCatalogAsAuthoritative(t *testing.T) {
 	r, _, _ := newTestRepl(t, "")
 	p := &dynamicModelProvider{stubProvider: &stubProvider{}}
 	r.Agent.SetProvider(p, "auto")
@@ -594,9 +594,24 @@ func TestModelCompletionUsesAuthenticatedProviderCatalog(t *testing.T) {
 	for _, candidate := range cands {
 		got = append(got, candidate.text)
 	}
-	joined := strings.Join(got, " ")
-	if !strings.Contains(joined, "gpt-5") || !strings.Contains(joined, "claude-sonnet-4.5") {
-		t.Fatalf("dynamic model candidates = %v", got)
+	want := []string{"claude-sonnet-4.5", "gpt-5"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("dynamic model candidates = %v; want %v", got, want)
+	}
+}
+
+func TestStaticProviderClearsAuthenticatedModelCatalog(t *testing.T) {
+	r, _, _ := newTestRepl(t, "")
+	dynamic := &dynamicModelProvider{stubProvider: &stubProvider{}}
+	if err := r.refreshProviderModels(context.Background(), dynamic, "github-copilot"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.refreshProviderModels(context.Background(), &stubProvider{}, "github-copilot"); err != nil {
+		t.Fatal(err)
+	}
+	options := r.modelOptions("github-copilot")
+	if len(options) != 1 || options[0][0] != "auto" {
+		t.Fatalf("static model candidates = %v; want catalog fallback", options)
 	}
 }
 

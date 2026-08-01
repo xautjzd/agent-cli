@@ -947,7 +947,11 @@ func (r *Repl) cmdModel(ctx context.Context, args string) error {
 				models = append(models, option[0])
 			}
 			fmt.Fprintf(r.Out, "known models: %s\n", strings.Join(models, ", "))
-			fmt.Fprintln(r.Out, "(any model the provider accepts works — this list is only a hint)")
+			if _, authoritative := r.dynamicModels[r.Cfg.Provider]; authoritative {
+				fmt.Fprintln(r.Out, "(models available to the authenticated account)")
+			} else {
+				fmt.Fprintln(r.Out, "(any model the provider accepts works — this list is only a hint)")
+			}
 		}
 		return nil
 	}

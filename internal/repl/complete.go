@@ -296,9 +296,10 @@ func markCurrent(cands []candidate, current string) []candidate {
 	return cands
 }
 
-// modelOptions lists model suggestions for a provider: the configured profile's
-// own model first — it may be newer than the catalog knows — then the catalog's
-// known models. Used for both "/model" and "/provider <name> <model>".
+// modelOptions lists model suggestions for a provider. An authenticated
+// provider catalog is authoritative because subscription entitlements can be
+// narrower than the provider's public API catalog. Static providers and named
+// profiles continue to use the advisory catalog.
 func (r *Repl) modelOptions(name string) [][2]string {
 	var options [][2]string
 	seen := map[string]bool{}
@@ -310,7 +311,8 @@ func (r *Repl) modelOptions(name string) [][2]string {
 		options = append(options, [2]string{p.Model, desc})
 		seen[p.Model] = true
 	}
-	for _, model := range r.dynamicModels[name] {
+	dynamic, hasDynamic := r.dynamicModels[name]
+	for _, model := range dynamic {
 		if model.ID == "" || seen[model.ID] {
 			continue
 		}
@@ -320,6 +322,9 @@ func (r *Repl) modelOptions(name string) [][2]string {
 		}
 		options = append(options, [2]string{model.ID, desc})
 		seen[model.ID] = true
+	}
+	if hasDynamic {
+		return options
 	}
 	for _, m := range catalog.ModelsFor(name) {
 		if seen[m] {
@@ -333,6 +338,11 @@ func (r *Repl) modelOptions(name string) [][2]string {
 func (r *Repl) refreshProviderModels(ctx context.Context, p provider.Provider, name string) error {
 	lister, ok := p.(provider.ModelLister)
 	if !ok {
+		// A provider name can switch transports (OpenAI subscription to API key,
+		// for example). Do not let the previous account-scoped catalog leak into
+		// the static transport's model picker.
+		delete(r.dynamicModels, name)
+		delete(r.dynamicModels, p.Name())
 		return nil
 	}
 	refreshCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
