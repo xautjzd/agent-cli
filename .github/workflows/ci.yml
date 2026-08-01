@@ -20,8 +20,8 @@ jobs:
       - name: Build
         run: go build ./...
 
-      - name: Build single-file entrypoint
-        run: go build -o /tmp/agent-cli ./cmd/agent/main.go
+      - name: Build CLI package
+        run: go build -o /tmp/agent-cli ./cmd/agent
 
       - name: Test
         run: go test ./...
