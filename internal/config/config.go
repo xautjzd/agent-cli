@@ -10,12 +10,15 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	providerAuth "github.com/xautjzd/agent-cli/internal/auth"
+	openAIAuth "github.com/xautjzd/agent-cli/internal/auth/openai"
 	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/log"
@@ -51,6 +54,9 @@ type ProviderConfig struct {
 
 // Config is the resolved runtime configuration.
 type Config struct {
+	// AuthService resolves managed provider logins at request time. It is a
+	// runtime dependency and is never serialized into config files.
+	AuthService *providerAuth.Service `json:"-"`
 	// Provider selects the vendor: a catalog preset ("openai", "deepseek",
 	// …), "custom", or the name of an entry in Providers. Empty means none
 	// has been chosen yet — the session opens and asks.
@@ -330,7 +336,7 @@ func LoadIn(projectDir string) (*Config, error) {
 	// in a session or "agent provider use" / "agent config set provider".
 	// Defaulting to a vendor the user has no key for only produced a
 	// credential error about a provider they never chose.
-	cfg := &Config{MaxTurns: 40}
+	cfg := &Config{MaxTurns: 40, AuthService: defaultAuthService()}
 
 	if path, err := Path(); err == nil {
 		if err := mergeFile(cfg, path); err != nil {
@@ -369,6 +375,22 @@ func LoadIn(projectDir string) (*Config, error) {
 	}
 	log.Debug("config", "LoadIn: provider=%s model=%s context_limit=%d", cfg.Provider, cfg.Model, cfg.ContextLimit)
 	return cfg, nil
+}
+
+func defaultAuthService() *providerAuth.Service {
+	registry := providerAuth.NewRegistry()
+	_ = registry.Register(openAIAuth.New())
+	return providerAuth.NewService(registry, providerAuth.DefaultStore())
+}
+
+type openAIAuthSource struct{ service *providerAuth.Service }
+
+func (s openAIAuthSource) Auth(ctx context.Context) (provider.RequestAuth, error) {
+	resolved, err := s.service.Resolve(ctx, "openai")
+	if err != nil {
+		return provider.RequestAuth{}, err
+	}
+	return provider.RequestAuth{Token: resolved.Secret, AccountID: resolved.Properties["account_id"]}, nil
 }
 
 // DefaultContextLimit is the fallback context window (tokens) used when the
@@ -938,6 +960,20 @@ func (c *Config) BuildProvider() (provider.Provider, error) {
 	if c.Provider == "" {
 		return nil, fmt.Errorf("no provider configured: run \"agent provider list\" to see the options, then \"agent provider use <name>\" (or /provider in a session)")
 	}
+	// Managed subscription credentials are valid only for OpenAI's own
+	// endpoint. Never forward them to a custom base URL. Explicit API keys
+	// (file or environment) retain precedence over the stored login.
+	if c.Provider == "openai" && c.APIKey == "" && (c.BaseURL == "" || strings.TrimRight(c.BaseURL, "/") == "https://api.openai.com/v1") {
+		service := c.AuthService
+		if service == nil {
+			service = defaultAuthService()
+		}
+		if loggedIn, err := service.HasCredential("openai"); err != nil {
+			return nil, err
+		} else if loggedIn {
+			return provider.NewOpenAICodex(openAIAuthSource{service: service}, pc)
+		}
+	}
 	if p, wire, ok := catalog.Resolve(c.Provider); ok {
 		// A legacy "<vendor>-anthropic" name carries its own wire, so it
 		// still selects the Anthropic endpoint without a "format" key.
@@ -954,8 +990,10 @@ func (c *Config) BuildProvider() (provider.Provider, error) {
 			pc.APIKey = "none"
 		}
 		if c.APIKey == "" && !p.Keyless && (ep.Format != provider.FormatAnthropic || ep.Auth == provider.AuthBearer) {
-			return nil, fmt.Errorf("provider %s needs a credential: export %s (get one at %s)",
-				p.Name, strings.Join(ep.EnvKeys, " or "), orDefault(p.Notes, "the vendor console"))
+			if p.Name == "openai" {
+				return nil, fmt.Errorf("provider openai needs a credential: run \"agent auth login openai\" to use a ChatGPT subscription, or export %s for API billing", strings.Join(ep.EnvKeys, " or "))
+			}
+			return nil, fmt.Errorf("provider %s needs a credential: export %s (get one at %s)", p.Name, strings.Join(ep.EnvKeys, " or "), orDefault(p.Notes, "the vendor console"))
 		}
 		// A preset addressed over a non-primary wire, or one that is not a
 		// registered built-in, is built like a profile from its endpoint's

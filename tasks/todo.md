@@ -24,7 +24,7 @@
   - Files: `internal/provider/auth.go`, `internal/provider/openai_codex.go`,
     `internal/provider/openai_codex_test.go`, `internal/provider/types.go`
 
-- [ ] Add auth resolution and the shell command surface.
+- [x] Add auth resolution and the shell command surface.
   - Acceptance: explicit config wins over stored auth, failed stored auth does
     not silently fall through, and `agent auth login/list/status/usage/logout`
     uses the registry with safe deterministic output.

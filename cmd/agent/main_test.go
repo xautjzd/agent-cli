@@ -116,6 +116,19 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
+func TestParseAuthTarget(t *testing.T) {
+	providerID, method, err := parseAuthTarget([]string{"openai", "--method", "device_code"}, true)
+	if err != nil || providerID != "openai" || method != "device_code" {
+		t.Fatalf("parseAuthTarget = %q, %q, %v", providerID, method, err)
+	}
+	if _, _, err := parseAuthTarget([]string{"openai", "--method", "browser"}, false); err == nil {
+		t.Fatal("non-login command accepted --method")
+	}
+	if _, _, err := parseAuthTarget([]string{"openai", "claude"}, true); err == nil {
+		t.Fatal("accepted two providers")
+	}
+}
+
 func TestCamelName(t *testing.T) {
 	cases := map[string]string{
 		"bash":       "Bash",
