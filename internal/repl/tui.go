@@ -97,15 +97,31 @@ func (s *scrollback) Reset() {
 	}
 }
 
+// Rewind marks the retained transcript for replay without discarding it. A
+// terminal resize uses this after clearing the visible frame so committed
+// lines are wrapped again at the new width instead of leaving reflow artifacts.
+func (s *scrollback) Rewind() {
+	s.mu.Lock()
+	s.committed = 0
+	s.generation++
+	s.mu.Unlock()
+}
+
 // --- messages ---------------------------------------------------------------
 
 type refreshMsg struct{}             // scrollback changed; re-render the viewport
 type turnDoneMsg struct{ done bool } // a turn finished (done => quit)
 type escExpireMsg struct{}           // the double-Esc arm window elapsed
+type resizeRepaintMsg struct{ serial uint64 }
 
 // escWindow is how long after a first Esc a second Esc still counts as the
 // double-tap that interrupts a running turn.
 const escWindow = time.Second
+
+// resizeRepaintDelay coalesces the burst of SIGWINCH events produced while a
+// terminal edge is being dragged. Layout still updates immediately; only the
+// full scrollback replay waits for the width to settle.
+const resizeRepaintDelay = 50 * time.Millisecond
 
 type askMsg struct { // a mid-turn text prompt needs answering
 	prompt string
@@ -162,6 +178,7 @@ type tuiModel struct {
 	scrollbackGeneration uint64
 	ready                bool // first WindowSizeMsg received
 	w, h                 int
+	resizeSerial         uint64
 
 	busy       bool               // a turn is running
 	turnCancel context.CancelFunc // cancels the running turn (Ctrl-C)
@@ -398,13 +415,37 @@ func (m *tuiModel) Init() tea.Cmd { return textinput.Blink }
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		widthChanged := m.ready && m.w != msg.Width
 		m.w, m.h = msg.Width, msg.Height
 		// Mark ready before refreshing: refreshViewport early-returns while
 		// !ready, so on the first size message the seeded banner would
 		// otherwise not render until the next refresh (the user's first input).
 		m.ready = true
+		m.resizeInput()
 		m.layout()
-		return m, m.commitFinalized()
+		commit := m.commitFinalized()
+		if widthChanged {
+			// In inline mode, narrowing the terminal can soft-wrap the previous
+			// wide frame before Bubble Tea gets the resize event. Its renderer
+			// then no longer knows how many physical rows to erase, leaving old
+			// input borders behind. Clear the visible frame once and let the next
+			// render paint the resized footer. Debounce the expensive transcript
+			// replay until a drag has settled.
+			m.resizeSerial++
+			serial := m.resizeSerial
+			repaint := tea.Tick(resizeRepaintDelay, func(time.Time) tea.Msg {
+				return resizeRepaintMsg{serial: serial}
+			})
+			return m, tea.Batch(commit, repaint)
+		}
+		return m, commit
+
+	case resizeRepaintMsg:
+		if msg.serial != m.resizeSerial {
+			return m, nil
+		}
+		m.sb.Rewind()
+		return m, tea.Sequence(tea.ClearScreen, m.commitFinalized())
 
 	case refreshMsg:
 		return m, m.commitFinalized()
@@ -909,6 +950,18 @@ func (m *tuiModel) basePrompt() string {
 }
 
 func (m *tuiModel) workingPrompt() string { return "> " }
+
+// resizeInput keeps the text input's own horizontal viewport inside the
+// bordered footer. The box width alone is not enough: textinput otherwise
+// retains its previous/default width after a WindowSizeMsg.
+func (m *tuiModel) resizeInput() {
+	inner := m.boxWidth() - 2 // horizontal padding inside the border
+	w := inner - lipgloss.Width(m.input.Prompt) - 2
+	if w < 8 {
+		w = 8
+	}
+	m.input.Width = w
+}
 
 // layout sizes the managed viewport for only the unfinished streaming tail.
 // Finalized history already occupies real terminal rows above the program, so

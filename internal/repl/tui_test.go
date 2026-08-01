@@ -139,14 +139,50 @@ func TestTUIEmptyLiveViewportDoesNotHideNativeHistory(t *testing.T) {
 
 func TestTUIResizeIsClean(t *testing.T) {
 	m := newTestTUI(t)
-	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	_, initialCmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if initialCmd != nil {
+		t.Fatal("initial size should not clear an empty screen")
+	}
 	// A resize must not panic and must re-fit the box to the new width.
-	m.Update(tea.WindowSizeMsg{Width: 70, Height: 18})
+	_, resizeCmd := m.Update(tea.WindowSizeMsg{Width: 70, Height: 18})
+	if resizeCmd == nil {
+		t.Fatal("resize should request a clean inline repaint")
+	}
+	if m.input.Width >= 70 {
+		t.Fatalf("text input width = %d; want less than terminal width", m.input.Width)
+	}
+	if m.scrollbackGeneration != 0 {
+		t.Fatal("resize should debounce the transcript replay")
+	}
+	repaintMsg := resizeCmd()
+	_, repaintCmd := m.Update(repaintMsg)
+	if repaintCmd == nil {
+		t.Fatal("settled resize should clear and repaint the inline frame")
+	}
+	if m.scrollbackGeneration != 1 {
+		t.Fatalf("scrollback generation = %d; resize should replay retained history", m.scrollbackGeneration)
+	}
 	view := m.View()
 	for _, line := range strings.Split(view, "\n") {
 		if w := lineWidth(line); w > 70 {
 			t.Errorf("line exceeds new width 70 (=%d): %q", w, line)
 		}
+	}
+}
+
+func TestTUIResizeRepaintCoalescesWidthChanges(t *testing.T) {
+	m := newTestTUI(t)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.Update(tea.WindowSizeMsg{Width: 90, Height: 30})
+	m.Update(tea.WindowSizeMsg{Width: 70, Height: 30})
+
+	m.Update(resizeRepaintMsg{serial: 1})
+	if m.scrollbackGeneration != 0 {
+		t.Fatal("stale resize repaint should be ignored")
+	}
+	_, cmd := m.Update(resizeRepaintMsg{serial: 2})
+	if cmd == nil || m.scrollbackGeneration != 1 {
+		t.Fatalf("latest resize repaint command=%v generation=%d", cmd != nil, m.scrollbackGeneration)
 	}
 }
 
