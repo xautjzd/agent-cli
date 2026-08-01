@@ -233,6 +233,37 @@ func TestResumePickerFlow(t *testing.T) {
 	}
 }
 
+func TestResumePickerKeepsCurrentSessionSelectable(t *testing.T) {
+	// A resumed session remains a recorded session. Opening the picker again
+	// must still list it, even when it is the project's only session.
+	r, _, out := newTestRepl(t, "1\n1\n")
+	store := withSessions(t, r)
+
+	if err := r.runPrompt(context.Background(), "only session"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.dispatch(context.Background(), "/clear"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.dispatch(context.Background(), "/resume"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.dispatch(context.Background(), "/resume"); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("resume should not delete or duplicate the session: %+v", metas)
+	}
+	if got := strings.Count(out.String(), "Resumed session "); got != 2 {
+		t.Fatalf("resume confirmations = %d, want 2:\n%s", got, out.String())
+	}
+}
+
 // captureEvents records the rendering calls made during replay.
 type captureEvents struct {
 	calls []string

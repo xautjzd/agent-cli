@@ -632,36 +632,29 @@ func (r *Repl) cmdResume(_ context.Context, args string) error {
 	if err != nil {
 		return err
 	}
-	// Offer everything except the session we are already in.
-	var others []session.Meta
-	for _, m := range metas {
-		if r.current == nil || m.ID != r.current.ID {
-			others = append(others, m)
-		}
-	}
-	if len(others) == 0 {
+	if len(metas) == 0 {
 		return fmt.Errorf("no previous sessions in this project")
 	}
 
 	// Arrow-navigable overlay inside the full-screen TUI: ↑↓ to move, type to
 	// search, Enter to select.
 	if r.tuiSelect != nil {
-		labels := sessionLabels(others, r.terminalWidth()-4)
-		items := make([]pickerItem, len(others))
-		for i, m := range others {
+		labels := sessionLabels(metas, r.terminalWidth()-4)
+		items := make([]pickerItem, len(metas))
+		for i, m := range metas {
 			items[i] = pickerItem{label: labels[i], filterText: labels[i] + " " + m.ID}
 		}
 		idx, ok := r.tuiSelect("Resume a session:", items)
 		if !ok {
 			return nil
 		}
-		return r.resume(others[idx].ID)
+		return r.resume(metas[idx].ID)
 	}
 	// Legacy nested picker (only reached in the old inline TTY path).
 	if r.useTUI {
-		labels := sessionLabels(others, r.terminalWidth()-4)
-		items := make([]pickerItem, len(others))
-		for i, m := range others {
+		labels := sessionLabels(metas, r.terminalWidth()-4)
+		items := make([]pickerItem, len(metas))
+		for i, m := range metas {
 			items[i] = pickerItem{
 				label:      labels[i],
 				filterText: labels[i] + " " + m.ID,
@@ -674,12 +667,12 @@ func (r *Repl) cmdResume(_ context.Context, args string) error {
 		if !ok {
 			return nil
 		}
-		return r.resume(others[idx].ID)
+		return r.resume(metas[idx].ID)
 	}
 
 	fmt.Fprintln(r.Out, "Sessions:")
-	labels := sessionLabels(others, r.terminalWidth()-8)
-	for i := range others {
+	labels := sessionLabels(metas, r.terminalWidth()-8)
+	for i := range metas {
 		fmt.Fprintf(r.Out, "  %2d. %s\n", i+1, labels[i])
 	}
 	line, ok := r.readInput("Select a session (Enter to cancel): ")
@@ -691,10 +684,10 @@ func (r *Repl) cmdResume(_ context.Context, args string) error {
 		return nil
 	}
 	n, err := strconv.Atoi(choice)
-	if err != nil || n < 1 || n > len(others) {
+	if err != nil || n < 1 || n > len(metas) {
 		return fmt.Errorf("invalid selection %q", choice)
 	}
-	return r.resume(others[n-1].ID)
+	return r.resume(metas[n-1].ID)
 }
 
 // orDefault returns s, or def when s is empty.
