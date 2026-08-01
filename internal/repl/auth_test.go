@@ -73,6 +73,30 @@ func TestInteractiveAuthCommandsShareService(t *testing.T) {
 	}
 }
 
+func TestLoginWithoutProviderAlwaysShowsProviderPicker(t *testing.T) {
+	r, _, out := newTestRepl(t, "")
+	registry := providerAuth.NewRegistry()
+	if err := registry.Register(replAuthAdapter{}); err != nil {
+		t.Fatal(err)
+	}
+	r.Cfg.AuthService = providerAuth.NewService(registry, providerAuth.NewStore(filepath.Join(t.TempDir(), "auth.json")))
+
+	selected := false
+	r.tuiSelect = func(title string, items []pickerItem) (int, bool) {
+		selected = true
+		if title != "Select provider" || len(items) != 1 || !strings.Contains(items[0].label, "Test Subscription") {
+			t.Fatalf("provider picker = %q, %#v", title, items)
+		}
+		return 0, true
+	}
+	if err := r.dispatch(context.Background(), "/login"); err != nil {
+		t.Fatal(err)
+	}
+	if !selected || !strings.Contains(out.String(), "Logged in") {
+		t.Fatalf("selected=%v output=%q", selected, out.String())
+	}
+}
+
 func TestUsageKeepsLocalOutputWhenManagedAuthUnavailable(t *testing.T) {
 	r, _, out := newTestRepl(t, "")
 	r.Cfg.AuthService = nil

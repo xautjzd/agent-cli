@@ -12,13 +12,16 @@ import (
 	providerAuth "github.com/xautjzd/agent-cli/internal/auth"
 )
 
-type replLoginUI struct{ repl *Repl }
+type replLoginUI struct {
+	repl        *Repl
+	forceChoice bool
+}
 
 func (ui replLoginUI) Select(_ context.Context, title string, methods []providerAuth.LoginMethod) (string, error) {
 	if len(methods) == 0 {
 		return "", fmt.Errorf("no choices available")
 	}
-	if len(methods) == 1 {
+	if len(methods) == 1 && !ui.forceChoice {
 		return methods[0].ID, nil
 	}
 	items := make([]pickerItem, len(methods))
@@ -110,7 +113,7 @@ func (r *Repl) selectAuthProvider(service *providerAuth.Service, requested strin
 		}
 		return "", fmt.Errorf("no managed login providers are available")
 	}
-	if len(ids) == 1 {
+	if len(ids) == 1 && storedOnly {
 		return ids[0], nil
 	}
 	methods := make([]providerAuth.LoginMethod, 0, len(ids))
@@ -121,7 +124,7 @@ func (r *Repl) selectAuthProvider(service *providerAuth.Service, requested strin
 		}
 		methods = append(methods, providerAuth.LoginMethod{ID: id, Label: label})
 	}
-	return (replLoginUI{repl: r}).Select(context.Background(), "Select provider", methods)
+	return (replLoginUI{repl: r, forceChoice: true}).Select(context.Background(), "Select provider", methods)
 }
 
 func parseLoginArgs(args string) (providerID, method string, err error) {
