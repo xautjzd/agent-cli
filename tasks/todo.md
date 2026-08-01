@@ -8,7 +8,7 @@
   - Files: `internal/auth/types.go`, `internal/auth/registry.go`,
     `internal/auth/store.go`, `internal/auth/auth_test.go`
 
-- [ ] Implement the OpenAI auth and subscription-usage adapter.
+- [x] Implement the OpenAI auth and subscription-usage adapter.
   - Acceptance: browser PKCE/state and device-code flows work through injected
     endpoints/UI; token refresh rotates safely; account claims and live limits
     are validated and normalized; errors redact credentials.
