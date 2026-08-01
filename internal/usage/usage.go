@@ -191,7 +191,43 @@ func NewRecorder(path string) *Recorder {
 	return r
 }
 
+// Aggregate loads and combines usage stores from every supplied path into a
+// read-only recorder. Entries for the same provider/model are summed, allowing
+// /usage to report this machine's activity across all projects while recording
+// can remain safely isolated in each project's usage.json.
+func Aggregate(paths []string) *Recorder {
+	r := &Recorder{byKey: map[string]*Entry{}, noWrite: true}
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		clean := filepath.Clean(path)
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		for _, e := range loadEntries(clean) {
+			r.merge(e)
+		}
+	}
+	return r
+}
+
 func key(provider, model string) string { return provider + "\x00" + model }
+
+func (r *Recorder) merge(e Entry) {
+	k := key(e.Provider, e.Model)
+	current := r.byKey[k]
+	if current == nil {
+		current = &Entry{Provider: e.Provider, Model: e.Model, Priced: true}
+		r.byKey[k] = current
+	}
+	current.Input += e.Input
+	current.Output += e.Output
+	current.Requests += e.Requests
+	current.DurationNS += e.DurationNS
+}
 
 // Record adds one completed request's usage and persists the update.
 func (r *Recorder) Record(provider, model string, input, output int, dur time.Duration) {
@@ -316,18 +352,21 @@ func (r *Recorder) load() {
 	if r.path == "" {
 		return
 	}
-	data, err := os.ReadFile(r.path)
+	for _, e := range loadEntries(r.path) {
+		r.merge(e)
+	}
+}
+
+func loadEntries(path string) []Entry {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return
+		return nil
 	}
 	var sf storeFile
 	if json.Unmarshal(data, &sf) != nil {
-		return
+		return nil
 	}
-	for i := range sf.Entries {
-		e := sf.Entries[i]
-		r.byKey[key(e.Provider, e.Model)] = &e
-	}
+	return sf.Entries
 }
 
 // save writes the totals; callers must hold the lock. Failures are ignored:

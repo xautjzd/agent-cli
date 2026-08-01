@@ -1718,11 +1718,19 @@ func (r *Repl) printLocalUsage() {
 	if reset != "" {
 		bold = "\033[1m"
 	}
-	rec := r.Agent.Usage
+	// Usage is a machine-wide view: each project records independently to avoid
+	// write contention, then /usage merges every project store for reporting.
+	// The in-memory fallback preserves embedders/tests that provide a recorder
+	// without an on-disk project store.
+	paths := session.AllUsagePaths()
+	rec := usage.Aggregate(paths)
+	if len(paths) == 0 && r.Agent.Usage != nil {
+		rec = r.Agent.Usage
+	}
 
 	if rec != nil {
 		if in, out, reqs, dur, cost, priced := rec.Totals(); in+out > 0 {
-			fmt.Fprintf(r.Out, "\n%s%sUsage%s %s· this project · all time%s\n\n", bold, cyan, reset, dim, reset)
+			fmt.Fprintf(r.Out, "\n%s%sUsage%s %s· all projects · all time%s\n\n", bold, cyan, reset, dim, reset)
 
 			// Label/value summary block, labels padded to a common width.
 			lbl := func(k, v string) {

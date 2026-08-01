@@ -8,13 +8,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xautjzd/agent-cli/internal/agent"
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/provider"
+	"github.com/xautjzd/agent-cli/internal/session"
 	"github.com/xautjzd/agent-cli/internal/skill"
 	"github.com/xautjzd/agent-cli/internal/tool"
+	"github.com/xautjzd/agent-cli/internal/usage"
 )
 
 // stubProvider records requests and returns a fixed answer.
@@ -34,6 +37,7 @@ func (s *stubProvider) Chat(_ context.Context, req provider.Request) (*provider.
 }
 
 func TestUsageCommand(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
 	r, _, out := newTestRepl(t, "")
 	// Before any turn: context occupancy unknown.
 	if err := r.dispatch(context.Background(), "/usage"); err != nil {
@@ -53,6 +57,35 @@ func TestUsageCommand(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, "This session") || !strings.Contains(got, "15 tok") || !strings.Contains(got, "context 15") {
 		t.Errorf("usage output wrong:\n%s", got)
+	}
+}
+
+func TestUsageCommandAggregatesAllProjects(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	first := usage.NewRecorder(session.UsagePath("/work/project-a"))
+	first.Record("openai", "gpt-5.6-sol", 100, 20, time.Second)
+	second := usage.NewRecorder(session.UsagePath("/work/project-b"))
+	second.Record("openai", "gpt-5.6-sol", 200, 30, 2*time.Second)
+	second.Record("anthropic", "claude-opus-4-8", 50, 10, 3*time.Second)
+
+	r, _, out := newTestRepl(t, "")
+	r.printLocalUsage()
+	got := stripANSI(out.String())
+	for _, want := range []string{
+		"Usage · this PC · all projects · all time",
+		"Tokens        410",
+		"Requests      3",
+		"gpt-5.6-sol",
+		"claude-opus-4-8",
+		"openai",
+		"anthropic",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("global usage missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "this project") {
+		t.Errorf("usage still claims project-only scope:\n%s", got)
 	}
 }
 

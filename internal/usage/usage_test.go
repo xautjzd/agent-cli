@@ -95,6 +95,34 @@ func TestRecorderPersists(t *testing.T) {
 	}
 }
 
+func TestAggregateCombinesProjectStores(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "project-a", "usage.json")
+	second := filepath.Join(dir, "project-b", "usage.json")
+
+	a := NewRecorder(first)
+	a.Record("openai", "gpt-5.6-sol", 100, 20, time.Second)
+	b := NewRecorder(second)
+	b.Record("openai", "gpt-5.6-sol", 200, 30, 2*time.Second)
+	b.Record("anthropic", "claude-opus-4-8", 50, 10, 3*time.Second)
+
+	// A duplicate path must not count the same project twice; missing/corrupt
+	// stores are ignored just like the machine-wide scanner ignores them.
+	corrupt := filepath.Join(dir, "broken.json")
+	if err := os.WriteFile(corrupt, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := Aggregate([]string{first, second, first, corrupt, filepath.Join(dir, "missing.json")})
+	in, out, reqs, dur, _, priced := r.Totals()
+	if in != 350 || out != 60 || reqs != 3 || dur != 6*time.Second || !priced {
+		t.Fatalf("aggregate totals = in=%d out=%d reqs=%d dur=%s priced=%v", in, out, reqs, dur, priced)
+	}
+	models := r.ByModel()
+	if len(models) != 2 || models[0].Model != "gpt-5.6-sol" || models[0].Input != 300 || models[0].Output != 50 {
+		t.Fatalf("aggregate models = %+v", models)
+	}
+}
+
 func TestRecorderConcurrent(t *testing.T) {
 	r := NewRecorder("")
 	var wg sync.WaitGroup
