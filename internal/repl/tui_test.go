@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,6 +93,31 @@ func TestTUITranscriptResetRequestsNativeScrollbackRebuild(t *testing.T) {
 	}
 	if m.scrollbackGeneration != 1 {
 		t.Fatalf("scrollback generation = %d, want 1", m.scrollbackGeneration)
+	}
+	// DECSED 3 alone only removes saved history and leaves the visible old
+	// banner on-screen. A rebuild must clear both regions before replaying.
+	if msg := fmt.Sprint(cmd()); !strings.Contains(msg, transcriptResetSequence) {
+		t.Fatalf("reset command does not clear visible screen and saved history: %q", msg)
+	}
+}
+
+func TestScrollbackReplaceIsAtomic(t *testing.T) {
+	notified := 0
+	sb := &scrollback{notify: func() { notified++ }}
+	sb.Write([]byte("old banner\n"))
+	notified = 0
+
+	sb.Replace("new banner\nconversation\n")
+
+	if got := sb.String(); got != "new banner\nconversation\n" {
+		t.Fatalf("replacement transcript = %q", got)
+	}
+	if notified != 1 {
+		t.Fatalf("replacement notifications = %d, want exactly 1", notified)
+	}
+	_, _, generation, _ := sb.DrainFinalized()
+	if generation != 1 {
+		t.Fatalf("replacement generation = %d, want 1", generation)
 	}
 }
 

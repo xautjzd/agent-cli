@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/permission"
 	"github.com/xautjzd/agent-cli/internal/provider"
@@ -246,6 +247,13 @@ func (r *Repl) applyLive(ctx context.Context, key, value string) error {
 	case "model":
 		r.Cfg.Model = value
 		r.Agent.SetModel(value)
+		// Keep the effective context window in sync with known models, matching
+		// /model, then refresh all model-dependent banner rows together.
+		if w := catalog.ContextWindow(r.Cfg.Provider, value); w > 0 {
+			r.Cfg.ContextLimit = w
+			r.Agent.ContextLimit = w
+		}
+		r.redrawTranscript()
 		return nil
 	case "api_key":
 		r.Cfg.APIKey = value
@@ -288,6 +296,7 @@ func (r *Repl) applyLive(ctx context.Context, key, value string) error {
 		// (e.g. no credential yet) — the field is set and applies on the
 		// next provider build regardless.
 		_ = r.rebuildProvider()
+		r.redrawTranscript()
 		return nil
 	case "vision_provider":
 		r.Cfg.VisionProvider = value
@@ -309,6 +318,7 @@ func (r *Repl) applyLive(ctx context.Context, key, value string) error {
 		}
 		r.Cfg.ContextLimit = n
 		r.Agent.ContextLimit = n
+		r.redrawTranscript()
 		return nil
 	case "bash_policy":
 		if value != "standard" && value != "strict" {

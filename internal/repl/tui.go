@@ -84,11 +84,19 @@ func (s *scrollback) DrainFinalized() (finalized string, tail string, generation
 	return finalized, content[s.committed:], generation, true
 }
 
-// Reset clears the buffer so the transcript can be reprinted from scratch
-// (used when /theme re-colors the whole session).
+// Reset clears the buffer so the transcript can be reprinted from scratch.
 func (s *scrollback) Reset() {
+	s.Replace("")
+}
+
+// Replace atomically swaps the complete transcript. Banner refreshes use this
+// instead of Reset followed by many writes: the TUI observes one generation
+// change containing the new banner and conversation, never an empty or
+// half-replayed intermediate transcript.
+func (s *scrollback) Replace(content string) {
 	s.mu.Lock()
 	s.buf.Reset()
+	s.buf.WriteString(content)
 	s.committed = 0
 	s.generation++
 	s.mu.Unlock()
@@ -122,6 +130,11 @@ const escWindow = time.Second
 // terminal edge is being dragged. Layout still updates immediately; only the
 // full scrollback replay waits for the width to settle.
 const resizeRepaintDelay = 50 * time.Millisecond
+
+// transcriptResetSequence clears the active screen, homes the cursor, and
+// purges the terminal's saved scrollback before a rebuilt transcript is
+// replayed. Using only DECSED 3 (\x1b[3J) leaves the visible old banner behind.
+const transcriptResetSequence = "\x1b[2J\x1b[H\x1b[3J"
 
 type askMsg struct { // a mid-turn text prompt needs answering
 	prompt string
@@ -1010,10 +1023,13 @@ func (m *tuiModel) commitFinalized() tea.Cmd {
 
 	payload := finalized
 	if reset {
-		// Transcript rebuilds (for example a live /theme preview) must replace,
-		// not duplicate, previously committed terminal history. DECSED 3 is
-		// the same scrollback purge Codex uses before replaying its transcript.
-		payload = "\x1b[3J" + payload
+		// Transcript rebuilds (for example a model switch or live /theme
+		// preview) must replace, not append to, the native terminal history.
+		// DECSED 3 only purges rows that have already scrolled off-screen; the
+		// old banner can still be visible in the active screen. Clear that screen,
+		// home the cursor, and purge saved history before replaying so exactly one
+		// current banner remains.
+		payload = transcriptResetSequence + payload
 	}
 
 	// Bubble Tea counts each printed line as one terminal row. Pre-wrapping

@@ -76,3 +76,40 @@ func TestSwitchThemeReRendersScrollback(t *testing.T) {
 		t.Errorf("banner not reprinted after switch: %q", got)
 	}
 }
+
+func TestRedrawTranscriptKeepsOneCurrentBanner(t *testing.T) {
+	r, _, _ := newTestRepl(t, "")
+	sb := &scrollback{}
+	r.sb = sb
+	r.Out = sb
+
+	// Simulate successive provider/model/effort/context changes. Every redraw
+	// must replace the prior header rather than append another one.
+	r.Cfg.Provider = "anthropic"
+	r.Cfg.Model = "claude-old"
+	r.Cfg.Thinking = "low"
+	r.Cfg.ContextLimit = 128000
+	r.redrawTranscript()
+
+	r.Cfg.Provider = "openai"
+	r.Cfg.Model = "gpt-current"
+	r.Cfg.Thinking = "high"
+	r.Cfg.ContextLimit = 200000
+	r.redrawTranscript()
+	r.redrawTranscript() // theme previews may redraw the same state repeatedly
+
+	got := stripANSI(sb.String())
+	if count := strings.Count(got, "✻ agent-cli"); count != 1 {
+		t.Fatalf("banner count = %d, want exactly 1:\n%s", count, got)
+	}
+	for _, want := range []string{"provider openai", "model    gpt-current", "effort   high", "context  200K tokens"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("updated banner missing %q:\n%s", want, got)
+		}
+	}
+	for _, stale := range []string{"anthropic", "claude-old", "128K tokens"} {
+		if strings.Contains(got, stale) {
+			t.Errorf("updated banner retains stale value %q:\n%s", stale, got)
+		}
+	}
+}

@@ -79,15 +79,23 @@ func (r *Repl) switchTheme(name string) {
 }
 
 // redrawTranscript rebuilds the full-screen scrollback from scratch — banner
-// then the current conversation — so header info (provider/model, theme) and a
-// cleared session are reflected immediately. The banner is seeded once at the
-// top of the scrollback, so an in-place update of the provider/model shown
-// there requires a full re-render. No-op outside the TUI.
+// then the current conversation — so header info (provider/model/effort/context
+// and theme) is reflected immediately. Build it off-screen and replace the
+// scrollback atomically: refresh notifications can otherwise render the banner
+// midway through replay and briefly leave duplicate/stale terminal output.
+// No-op outside the TUI.
 func (r *Repl) redrawTranscript() {
 	if r.sb == nil {
 		return
 	}
-	r.sb.Reset()
-	r.printBanner(r.sb)
-	r.replayTranscript(r.buildRecords())
+
+	var rebuilt strings.Builder
+	r.printBanner(&rebuilt)
+	func() {
+		oldEvents := r.Agent.Events
+		r.Agent.Events = newTUIEvents(&rebuilt)
+		defer func() { r.Agent.Events = oldEvents }()
+		r.replayTranscript(r.buildRecords())
+	}()
+	r.sb.Replace(rebuilt.String())
 }
