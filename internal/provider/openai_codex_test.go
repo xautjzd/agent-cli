@@ -47,10 +47,12 @@ func TestOpenAICodexStreamsTextReasoningToolsAndUsage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p, err := NewOpenAICodex(staticAuthSource{auth: RequestAuth{Token: "access-secret", AccountID: "acct-1"}}, Config{BaseURL: server.URL})
+	p, err := NewOpenAICodex(staticAuthSource{auth: RequestAuth{Token: "access-secret", AccountID: "acct-1"}}, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.(*openAICodex).baseURL = server.URL
+	p.(*openAICodex).client = server.Client()
 	streamer := p.(Streamer)
 	var deltas []Delta
 	resp, err := streamer.ChatStream(context.Background(), Request{
@@ -109,10 +111,12 @@ func TestOpenAICodexAuthAndHTTPFailuresAreSafe(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"message":"` + secret + `","code":"unauthorized"}}`))
 	}))
 	defer server.Close()
-	p, err = NewOpenAICodex(staticAuthSource{auth: RequestAuth{Token: secret, AccountID: "acct"}}, Config{BaseURL: server.URL})
+	p, err = NewOpenAICodex(staticAuthSource{auth: RequestAuth{Token: secret, AccountID: "acct"}}, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.(*openAICodex).baseURL = server.URL
+	p.(*openAICodex).client = server.Client()
 	_, err = p.Chat(context.Background(), Request{})
 	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "unauthorized") {
 		t.Fatalf("unsafe HTTP error = %v", err)
@@ -123,5 +127,21 @@ func TestParseCodexStreamRequiresTerminalEvent(t *testing.T) {
 	_, err := parseCodexStream(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"), func(Delta) {})
 	if err == nil || !strings.Contains(err.Error(), "before completion") {
 		t.Fatalf("stream error = %v", err)
+	}
+}
+
+func TestOpenAICodexRejectsCustomBaseURLAndAllowsNilStreamCallback(t *testing.T) {
+	auth := staticAuthSource{auth: RequestAuth{Token: "token", AccountID: "account"}}
+	if _, err := NewOpenAICodex(auth, Config{BaseURL: "https://gateway.example/v1"}); err == nil {
+		t.Fatal("subscription transport accepted a custom base URL")
+	}
+
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"ok"}`,
+		`data: {"type":"response.completed","response":{"status":"completed"}}`,
+	}, "\n\n")
+	response, err := parseCodexStream(strings.NewReader(stream), nil)
+	if err != nil || response.Message.Content != "ok" {
+		t.Fatalf("parseCodexStream = %#v, %v", response, err)
 	}
 }

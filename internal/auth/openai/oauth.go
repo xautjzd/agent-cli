@@ -53,6 +53,10 @@ func (a *Adapter) Login(ctx context.Context, req providerAuth.LoginRequest, ui p
 }
 
 func (a *Adapter) loginBrowser(ctx context.Context, ui providerAuth.LoginUI) (providerAuth.Credential, error) {
+	host, _, err := net.SplitHostPort(a.CallbackAddr)
+	if err != nil || (host != "localhost" && (net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback())) {
+		return providerAuth.Credential{}, fmt.Errorf("OpenAI login callback must use a loopback address")
+	}
 	listener, err := net.Listen("tcp", a.CallbackAddr)
 	if err != nil {
 		return providerAuth.Credential{}, fmt.Errorf("start OpenAI login callback: %w", err)

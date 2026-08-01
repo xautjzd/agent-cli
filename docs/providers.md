@@ -12,6 +12,43 @@ permission gate, plan mode, and goals behave identically across providers.
 
 ## Usage
 
+### Provider accounts and subscriptions
+
+Authentication is a provider capability, separate from provider/model selection.
+The command family is deliberately generic so future Claude, Kimi, and other
+subscription adapters can register alongside OpenAI without adding vendor-specific
+top-level commands:
+
+```bash
+agent auth list
+agent auth login openai                 # choose browser or device-code login
+agent auth login openai --method browser
+agent auth status openai
+agent auth usage openai                 # fetch live subscription limits
+agent auth logout openai
+```
+
+The same operations are available during a session as `/login [provider] [method]`,
+`/logout [provider]`, `/auth [provider]`, and `/usage [provider]`.
+When only one eligible provider exists, its name may be omitted.
+
+OpenAI login uses the ChatGPT/Codex subscription attached to the account. It is
+different from `OPENAI_API_KEY`: an API key uses API billing and the regular
+OpenAI API transport, while a managed login uses the ChatGPT subscription and
+the Codex Responses transport. Explicit API keys retain precedence, so existing
+automation does not change after logging in.
+
+Managed credentials are stored in `<agent-home>/auth.json` with restrictive
+permissions, atomic replacement, and cross-process refresh locking. They are not
+written to project config, sessions, prompts, usage history, or logs. OpenAI
+subscription tokens are sent only to OpenAI's official endpoint; setting a custom
+`base_url` requires its own explicit credential.
+
+Browser login listens briefly on loopback for the OAuth callback. Use
+`--method device_code` on a remote/headless host. Login and live usage require
+network access; a temporary usage lookup failure does not end an interactive
+session.
+
 ### Switching provider/model
 
 ```bash

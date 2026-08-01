@@ -1,8 +1,15 @@
 # Usage & cost tracking
 
-`/usage` reports token consumption and **estimated cost** the way Claude Code's
-Usage panel does — **all-time for the project** (persisted across sessions), broken
-down **by model** and **by provider**, plus the current session.
+`/usage` reports two intentionally separate kinds of information:
+
+1. local token consumption and **estimated API cost** — all-time for the project,
+   broken down by model/provider, plus the current session;
+2. freshly fetched subscription limits for the active managed-login provider,
+   when that provider exposes them.
+
+The second section is provider-reported entitlement data, not inferred dollar
+cost. Use `/usage openai` or `agent auth usage openai` to request only live OpenAI
+subscription usage.
 
 ```
 Usage · this project · all time
@@ -21,7 +28,17 @@ Usage · this project · all time
     deepseek    13.0k tok    5.0k → 8.0k         —
 
   This session   15.2k tok · 12.3s · context 15.2k
+
+Subscription · openai · plus
+  primary: 18% used over 5h0m0s; resets 2026-08-01T16:00:00+08:00
+  secondary: 7% used over 168h0m0s; resets 2026-08-07T12:00:00+08:00
 ```
+
+Live limits are fetched on each explicit request rather than cached as local
+accounting. Providers can expose different windows or allowances, so labels are
+preserved instead of pretending every plan has a universal “remaining tokens”
+number. If the network or provider usage endpoint is unavailable, `/usage`
+keeps the local report and shows a non-fatal availability note.
 
 ## Where totals live
 

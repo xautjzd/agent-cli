@@ -32,7 +32,7 @@
   - Files: `internal/auth/service.go`, `internal/config/config.go`,
     `internal/config/config_test.go`, `cmd/agent/main.go`, `cmd/agent/main_test.go`
 
-- [ ] Add interactive auth commands, live usage, docs, and final review.
+- [x] Add interactive auth commands, live usage, docs, and final review.
   - Acceptance: `/login`, `/logout`, `/auth`, and `/usage` share the service;
     subscription limits stay separate from local costs; offline behavior is
     graceful; docs match behavior; no credential reaches logs/session/config.

@@ -128,6 +128,15 @@ func TestBrowserLoginRejectsWrongStateWithoutTokenExchange(t *testing.T) {
 	}
 }
 
+func TestBrowserLoginRejectsNonLoopbackCallback(t *testing.T) {
+	a := New()
+	a.CallbackAddr = "0.0.0.0:0"
+	_, err := a.Login(context.Background(), providerAuth.LoginRequest{Method: "browser"}, &testUI{})
+	if err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("Login error = %v; want loopback validation", err)
+	}
+}
+
 func TestDeviceLoginAndRefresh(t *testing.T) {
 	firstAccess := jwt(t, "acct-device", "device@example.com", "pro")
 	secondAccess := jwt(t, "acct-device", "device@example.com", "pro")

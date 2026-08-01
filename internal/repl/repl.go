@@ -25,9 +25,9 @@ import (
 	"github.com/xautjzd/agent-cli/internal/config"
 	"github.com/xautjzd/agent-cli/internal/home"
 	"github.com/xautjzd/agent-cli/internal/hook"
+	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/lsp"
 	"github.com/xautjzd/agent-cli/internal/mcp"
-	"github.com/xautjzd/agent-cli/internal/log"
 	"github.com/xautjzd/agent-cli/internal/memory"
 	"github.com/xautjzd/agent-cli/internal/permission"
 
@@ -194,6 +194,9 @@ func init() {
 		{"help", "/help", "List commands and installed skills", (*Repl).cmdHelp},
 		{"model", "/model [name]", "Show or switch the model", (*Repl).cmdModel},
 		{"provider", "/provider [<name> [model]|custom|remove <name>]", "Switch provider, or define a custom one", (*Repl).cmdProvider},
+		{"login", "/login [provider] [method]", "Sign in with a provider account or subscription", (*Repl).cmdLogin},
+		{"logout", "/logout [provider]", "Remove a stored provider login", (*Repl).cmdLogout},
+		{"auth", "/auth [provider]", "Show provider login status and methods", (*Repl).cmdAuth},
 		{"effort", "/effort [level]", "Set reasoning-effort level (the levels the model accepts)", (*Repl).cmdEffort},
 		{"mode", "/mode [hitl|bypass]", "Show or switch the permission mode for dangerous operations", (*Repl).cmdMode},
 		{"plan", "/plan [task|off]", "Plan mode: explore read-only, propose a plan, implement on approval", (*Repl).cmdPlan},
@@ -204,7 +207,7 @@ func init() {
 		{"resume", "/resume [id]", "Resume a previous session in this project", (*Repl).cmdResume},
 		{"rewind", "/rewind", "Undo to a checkpoint: restore files and conversation to before an earlier message", (*Repl).cmdRewind},
 		// Inspection and configuration.
-		{"usage", "/usage", "Show token usage, timing, and context occupancy", (*Repl).cmdUsage},
+		{"usage", "/usage [provider]", "Show local usage and live subscription limits", (*Repl).cmdUsage},
 		{"config", "/config [set k v]", "Open the settings panel (view + edit); or set one value", (*Repl).cmdConfig},
 		{"memory", "/memory", "List saved project memories", (*Repl).cmdMemory},
 		{"goal", "/goal [text|clear]", "Set a session goal the agent works toward until met", (*Repl).cmdGoal},
@@ -1673,7 +1676,24 @@ func (r *Repl) cmdCompact(ctx context.Context, _ string) error {
 // usageRow is one aligned row of the /usage tables.
 type usageRow struct{ name, tok, in, out, cost string }
 
-func (r *Repl) cmdUsage(_ context.Context, _ string) error {
+func (r *Repl) cmdUsage(ctx context.Context, args string) error {
+	providerID := strings.TrimSpace(args)
+	if strings.Contains(providerID, " ") {
+		return fmt.Errorf("usage: /usage [provider]")
+	}
+	if providerID == "" {
+		r.printLocalUsage()
+	}
+	if err := r.printSubscriptionUsage(ctx, providerID); err != nil {
+		// Usage is informational. Offline or temporarily unsupported endpoints
+		// should not turn a healthy interactive session into a command failure.
+		th := theme.Current()
+		fmt.Fprintf(r.Out, "\n  %sSubscription usage unavailable: %v%s\n", th.Muted, err, th.Reset)
+	}
+	return nil
+}
+
+func (r *Repl) printLocalUsage() {
 	th := theme.Current()
 	dim, reset, cyan := th.Muted, th.Reset, th.Accent
 	bold := ""
@@ -1733,7 +1753,6 @@ func (r *Repl) cmdUsage(_ context.Context, _ string) error {
 	}
 	fmt.Fprintf(r.Out, "\n  %sThis session%s   %s tok · %s · context %s\n",
 		dim, reset, abbrevTok(tokens), dur.Round(100*time.Millisecond), ctxNote)
-	return nil
 }
 
 // printUsageTable renders a titled, column-aligned usage breakdown:

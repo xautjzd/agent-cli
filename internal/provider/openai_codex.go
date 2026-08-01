@@ -35,9 +35,10 @@ func NewOpenAICodex(source AuthSource, cfg Config) (Provider, error) {
 		return nil, fmt.Errorf("OpenAI subscription auth source is required")
 	}
 	base := strings.TrimRight(cfg.BaseURL, "/")
-	if base == "" || base == openAIBaseURL {
-		base = openAICodexBaseURL
+	if base != "" && base != openAIBaseURL {
+		return nil, fmt.Errorf("OpenAI subscription authentication cannot be used with a custom base URL")
 	}
+	base = openAICodexBaseURL
 	effort, _ := ParseEffort(cfg.Thinking)
 	return &openAICodex{
 		auth:    source,
@@ -280,10 +281,14 @@ func parseCodexStream(body io.Reader, onDelta func(Delta)) (*Response, error) {
 		switch event.Type {
 		case "response.output_text.delta":
 			response.Message.Content += event.Delta
-			onDelta(Delta{Content: event.Delta})
+			if onDelta != nil {
+				onDelta(Delta{Content: event.Delta})
+			}
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 			response.Message.ReasoningContent += event.Delta
-			onDelta(Delta{Reasoning: event.Delta})
+			if onDelta != nil {
+				onDelta(Delta{Reasoning: event.Delta})
+			}
 		case "response.output_item.added":
 			var item codexOutputItem
 			if json.Unmarshal(event.Item, &item) == nil && item.Type == "function_call" {

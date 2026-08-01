@@ -55,6 +55,9 @@ opens a numbered picker.
 | `/provider [<name> [model]]` | Switch provider (prompts for the API key if none is set, offers to save it); bare lists them all |
 | `/provider custom` | Define a custom provider — asks for name, base URL, API style, model, key |
 | `/provider remove <name>` | Delete a custom provider |
+| `/login [provider] [method]` | Sign in with a provider account/subscription (OpenAI browser or device code initially) |
+| `/logout [provider]` | Remove a stored provider login |
+| `/auth [provider]` | Show safe login status and supported methods |
 | `/<skill-name> [task]` | Run any installed skill as a slash command, optionally with a task |
 | `/<command> [args]` | Run a [custom slash command](custom-commands.md) |
 | `/skills` | List installed skills |
@@ -72,7 +75,7 @@ opens a numbered picker.
 | `/plan [task]` | Plan mode: explore read-only, propose a plan, implement on approval |
 | `/mode [hitl\|bypass]` | Show or switch the permission mode |
 | `/effort [level]` | Show or set reasoning effort — only the levels the active model accepts ([details](providers.md#reasoning-effort-is-per-model-not-per-vendor)) |
-| `/usage` | Usage & cost totals + per-model/provider breakdown |
+| `/usage [provider]` | Local usage/cost plus separately labelled live subscription limits |
 | `/compact` | Summarize earlier turns to free up context now |
 | `/rewind` | Undo — restore files and trim the conversation to an earlier state |
 | `/rename [title]` | Rename the current session |
