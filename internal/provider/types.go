@@ -6,7 +6,10 @@
 // registering a factory (Open/Closed Principle).
 package provider
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Role constants for chat messages, matching the OpenAI wire format that
 // both OpenAI and DeepSeek (and most compatible vendors) share.
@@ -92,6 +95,11 @@ type Request struct {
 	Model    string
 	Messages []Message
 	Tools    []ToolDef
+	// ExecuteTool is an optional host-controlled executor for providers whose
+	// official SDK owns the agent loop (GitHub Copilot, for example). The host
+	// remains responsible for permission checks, hooks, audit, and rendering.
+	// Ordinary chat-completion providers ignore it and return ToolCalls.
+	ExecuteTool func(context.Context, ToolCall) (content string, ok bool)
 	// MaxTokens caps the completion length; 0 means provider default.
 	MaxTokens int
 }
@@ -110,6 +118,13 @@ type Usage struct {
 	// this request (billed at a large discount). Anthropic reports it as
 	// cache_read_input_tokens. It is a subset of PromptTokens.
 	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
+}
+
+// ModelInfo is one provider-reported model available to the authenticated
+// account. ID is the value accepted by Request.Model; Name is display-only.
+type ModelInfo struct {
+	ID   string
+	Name string
 }
 
 // Response is the assistant's reply to a Request. When ToolCalls is

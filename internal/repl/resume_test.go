@@ -56,7 +56,7 @@ func TestProviderListingKeepsBuiltinsVisible(t *testing.T) {
 		}
 	}
 	want := []string{
-		"openai", "anthropic", "google", "deepseek", "zai", "kimi", "minimax",
+		"openai", "github-copilot", "anthropic", "google", "deepseek", "zai", "kimi", "minimax",
 		"xai", "openrouter", "dashscope", "dashscope-intl", "siliconflow", "ollama",
 	}
 	if strings.Join(names, " ") != strings.Join(want, " ") {

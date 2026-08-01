@@ -55,7 +55,7 @@ opens a numbered picker.
 | `/provider [<name> [model]]` | Switch provider (prompts for the API key if none is set, offers to save it); bare lists them all |
 | `/provider custom` | Define a custom provider — asks for name, base URL, API style, model, key |
 | `/provider remove <name>` | Delete a custom provider |
-| `/login [provider] [method]` | Sign in with a provider account/subscription (OpenAI browser or device code initially) |
+| `/login [provider] [method]` | Sign in with a provider account/subscription (OpenAI or GitHub Copilot) |
 | `/logout [provider]` | Remove a stored provider login |
 | `/auth [provider]` | Show safe login status and supported methods |
 | `/<skill-name> [task]` | Run any installed skill as a slash command, optionally with a task |

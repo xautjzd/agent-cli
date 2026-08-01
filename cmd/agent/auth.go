@@ -83,6 +83,14 @@ func (ui *shellLoginUI) Prompt(_ context.Context, label string) (string, error) 
 	return answer, nil
 }
 
+func (ui *shellLoginUI) PromptSecret(_ context.Context, label string) (string, error) {
+	value := strings.TrimSpace(promptSecret(ui.in, label))
+	if value == "" {
+		return "", fmt.Errorf("cancelled")
+	}
+	return value, nil
+}
+
 func (*shellLoginUI) Notify(message string) { fmt.Println(message) }
 
 func authProvider(service *providerAuth.Service, requested string, storedOnly bool) (string, error) {

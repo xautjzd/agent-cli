@@ -23,6 +23,8 @@ top-level commands:
 agent auth list
 agent auth login openai                 # choose browser or device-code login
 agent auth login openai --method browser
+agent auth login github-copilot         # choose GitHub CLI or token
+agent auth login github-copilot --method github_cli
 agent auth status openai
 agent auth usage openai                 # fetch live subscription limits
 agent auth logout openai
@@ -43,6 +45,30 @@ permissions, atomic replacement, and cross-process refresh locking. They are not
 written to project config, sessions, prompts, usage history, or logs. OpenAI
 subscription tokens are sent only to OpenAI's official endpoint; setting a custom
 `base_url` requires its own explicit credential.
+
+GitHub Copilot login uses GitHub's official Copilot SDK and consumes the signed-in
+account's Copilot subscription allowance. The recommended `github_cli` method reads
+the credential from `gh` only when a request is made and does not copy it into the
+agent credential store. Sign in first with `gh auth login --hostname github.com --web`.
+Alternatively, choose `token` and enter a GitHub token authorized for Copilot
+Requests; secret prompts are masked. `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, and
+`GITHUB_TOKEN` are also accepted without a stored login.
+
+The provider also requires a current GitHub Copilot CLI runtime in `PATH` (or at
+`COPILOT_CLI_PATH`). This is separate from the `gh` CLI used to obtain the login
+token. If the runtime reports that `--headless` is unknown, update it with
+`copilot update` or reinstall the latest Copilot CLI before retrying.
+
+Copilot's SDK owns its internal model loop. agent-cli disables the SDK's built-in
+tools and exposes only the current agent-cli tool catalog, so permission checks,
+hooks, audit records, and sandbox policy remain in force. Image message parts are
+not yet supported by this provider. Logging out removes agent-cli's login marker or
+stored token; it intentionally does not log the user out of the shared `gh` account.
+In an interactive session, `/login github-copilot` also activates that provider and
+refreshes `/model` choices from the authenticated account through the SDK. `auto`
+remains as the offline fallback if the live model catalog cannot be fetched. The
+shell-level `agent auth login` command only authenticates; follow it with
+`agent provider use github-copilot` to change the saved provider choice.
 
 Browser login listens briefly on loopback for the OAuth callback. Use
 `--method device_code` on a remote/headless host. Login and live usage require
@@ -93,6 +119,7 @@ in `internal/catalog/catalog.go` rather than alphabetical:
 | Preset | Vendor | Wire format | Credential |
 |---|---|---|---|
 | `openai` | OpenAI | OpenAI | `OPENAI_API_KEY` |
+| `github-copilot` (`copilot`) | GitHub Copilot subscription | Official Copilot SDK | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` |
 | `anthropic` | Anthropic | Anthropic | `ANTHROPIC_API_KEY` |
 | `google` (`gemini`) | Google (Gemini) | OpenAI-compatible surface | `GEMINI_API_KEY` |
 | `deepseek` | DeepSeek | OpenAI + Anthropic | `DEEPSEEK_API_KEY` |

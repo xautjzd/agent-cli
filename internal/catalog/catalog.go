@@ -95,6 +95,18 @@ var presets = []Provider{
 		Notes:         "platform.openai.com",
 	},
 	{
+		Name:          "github-copilot",
+		Aliases:       []string{"copilot"},
+		Label:         "GitHub Copilot",
+		Format:        provider.FormatOpenAI,
+		EnvKeys:       []string{"COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"},
+		DefaultModel:  "auto",
+		Models:        []string{"auto"},
+		ContextWindow: 128_000,
+		Vision:        false,
+		Notes:         "uses your GitHub Copilot subscription",
+	},
+	{
 		Name:         "anthropic",
 		Label:        "Anthropic",
 		Format:       provider.FormatAnthropic,

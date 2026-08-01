@@ -17,6 +17,11 @@ func (replAuthAdapter) DisplayName() string { return "Test Subscription" }
 func (replAuthAdapter) Methods() []providerAuth.LoginMethod {
 	return []providerAuth.LoginMethod{{ID: "automatic", Label: "Automatic", Description: "Test login"}}
 }
+
+type openAIReplAuthAdapter struct{ replAuthAdapter }
+
+func (openAIReplAuthAdapter) ID() string          { return "openai" }
+func (openAIReplAuthAdapter) DisplayName() string { return "OpenAI" }
 func (replAuthAdapter) Login(context.Context, providerAuth.LoginRequest, providerAuth.LoginUI) (providerAuth.Credential, error) {
 	data, _ := json.Marshal(map[string]string{"token": "test-token"})
 	return providerAuth.NewCredential(providerAuth.CredentialOAuth, nil, data), nil
@@ -94,6 +99,26 @@ func TestLoginWithoutProviderAlwaysShowsProviderPicker(t *testing.T) {
 	}
 	if !selected || !strings.Contains(out.String(), "Logged in") {
 		t.Fatalf("selected=%v output=%q", selected, out.String())
+	}
+}
+
+func TestInteractiveLoginActivatesBuiltInProvider(t *testing.T) {
+	t.Setenv("AGENT_HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "")
+	r, _, out := newTestRepl(t, "")
+	registry := providerAuth.NewRegistry()
+	if err := registry.Register(openAIReplAuthAdapter{}); err != nil {
+		t.Fatal(err)
+	}
+	r.Cfg.AuthService = providerAuth.NewService(registry, providerAuth.DefaultStore())
+	if err := r.dispatch(context.Background(), "/login openai automatic"); err != nil {
+		t.Fatal(err)
+	}
+	if r.Cfg.Provider != "openai" || r.Agent.Provider.Name() != "openai" {
+		t.Fatalf("active provider cfg=%q agent=%q", r.Cfg.Provider, r.Agent.Provider.Name())
+	}
+	if !strings.Contains(out.String(), "Switched to provider=openai") {
+		t.Fatalf("login output = %q", out.String())
 	}
 }
 

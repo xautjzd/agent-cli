@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/xautjzd/agent-cli/internal/config"
+	"github.com/xautjzd/agent-cli/internal/provider"
 )
 
 // TestInputBoxStaysOneRow guards the reported paste-then-type bug: the
@@ -558,13 +560,43 @@ func TestProviderCompletionKeepsCatalogOrder(t *testing.T) {
 		// Every built-in follows, in catalog order — including minimax, whose
 		// name the profile has taken: the vendor still exists and the row says
 		// what happened to the name.
-		"openai", "anthropic", "google", "deepseek", "zai", "kimi", "minimax",
+		"openai", "github-copilot", "anthropic", "google", "deepseek", "zai", "kimi", "minimax",
 		"xai", "openrouter", "dashscope", "dashscope-intl", "siliconflow", "ollama",
 		// The action trails the providers rather than pushing them down.
 		"custom",
 	}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("provider completion order =\n%v\nwant\n%v", got, want)
+	}
+}
+
+type dynamicModelProvider struct{ *stubProvider }
+
+func (*dynamicModelProvider) Name() string { return "github-copilot" }
+func (*dynamicModelProvider) Models(context.Context) ([]provider.ModelInfo, error) {
+	return []provider.ModelInfo{
+		{ID: "gpt-5", Name: "GPT-5"},
+		{ID: "claude-sonnet-4.5", Name: "Claude Sonnet 4.5"},
+	}, nil
+}
+
+func TestModelCompletionUsesAuthenticatedProviderCatalog(t *testing.T) {
+	r, _, _ := newTestRepl(t, "")
+	p := &dynamicModelProvider{stubProvider: &stubProvider{}}
+	r.Agent.SetProvider(p, "auto")
+	r.Cfg.Provider = "github-copilot"
+	r.Cfg.Model = "auto"
+	if err := r.refreshProviderModels(context.Background(), p, r.Cfg.Provider); err != nil {
+		t.Fatal(err)
+	}
+	cands := r.completionsFor("/model ", len("/model "))
+	var got []string
+	for _, candidate := range cands {
+		got = append(got, candidate.text)
+	}
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "gpt-5") || !strings.Contains(joined, "claude-sonnet-4.5") {
+		t.Fatalf("dynamic model candidates = %v", got)
 	}
 }
 

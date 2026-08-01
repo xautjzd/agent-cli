@@ -35,10 +35,10 @@ Interactive aliases use the same registry and command handlers:
 per-project token history and, when the active provider exposes live
 subscription usage, appends a separately labelled live section.
 
-With only OpenAI subscription auth implemented initially, an omitted provider
-selects OpenAI directly when there is no meaningful provider choice, then asks
-for browser or device-code login. The provider selector appears automatically
-when more adapters are registered. `--method browser` and
+With OpenAI and GitHub Copilot subscription auth implemented, an omitted provider
+opens the provider picker, then the selected adapter asks for its supported login
+method. The provider selector appears automatically when more adapters are
+registered. `--method browser` and
 `--method device_code` make the initial OpenAI flow scriptable without adding
 vendor-specific flags to the generic command.
 

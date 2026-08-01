@@ -1,10 +1,12 @@
 package repl
 
 import (
+	"context"
 	"io/fs"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/provider"
@@ -308,6 +310,17 @@ func (r *Repl) modelOptions(name string) [][2]string {
 		options = append(options, [2]string{p.Model, desc})
 		seen[p.Model] = true
 	}
+	for _, model := range r.dynamicModels[name] {
+		if model.ID == "" || seen[model.ID] {
+			continue
+		}
+		desc := model.Name
+		if desc == "" || desc == model.ID {
+			desc = name + " · available to this account"
+		}
+		options = append(options, [2]string{model.ID, desc})
+		seen[model.ID] = true
+	}
 	for _, m := range catalog.ModelsFor(name) {
 		if seen[m] {
 			continue
@@ -315,6 +328,26 @@ func (r *Repl) modelOptions(name string) [][2]string {
 		options = append(options, [2]string{m, name})
 	}
 	return options
+}
+
+func (r *Repl) refreshProviderModels(ctx context.Context, p provider.Provider, name string) error {
+	lister, ok := p.(provider.ModelLister)
+	if !ok {
+		return nil
+	}
+	refreshCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	models, err := lister.Models(refreshCtx)
+	if err != nil {
+		return err
+	}
+	if r.dynamicModels == nil {
+		r.dynamicModels = make(map[string][]provider.ModelInfo)
+	}
+	copyOfModels := append([]provider.ModelInfo(nil), models...)
+	r.dynamicModels[name] = copyOfModels
+	r.dynamicModels[p.Name()] = copyOfModels
+	return nil
 }
 
 // filterCandidates keeps options whose name prefix- or substring-matches query,

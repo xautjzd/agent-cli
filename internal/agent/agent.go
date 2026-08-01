@@ -210,6 +210,10 @@ func (a *Agent) RunMessage(ctx context.Context, userMsg provider.Message) (strin
 			Model:    a.Model,
 			Messages: a.requestMessages(),
 			Tools:    a.toolDefs(),
+			ExecuteTool: func(toolCtx context.Context, call provider.ToolCall) (string, bool) {
+				out := a.runOneToolCall(toolCtx, call)
+				return out.content, out.ok
+			},
 		})
 		if err != nil {
 			// A user interrupt (Esc/Ctrl-C) cancels the context: keep whatever

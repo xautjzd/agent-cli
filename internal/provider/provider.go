@@ -31,6 +31,13 @@ type Streamer interface {
 	ChatStream(ctx context.Context, req Request, onDelta func(Delta)) (*Response, error)
 }
 
+// ModelLister is optionally implemented by providers whose available models
+// depend on the authenticated account. Static providers continue to use the
+// advisory catalog without implementing this interface.
+type ModelLister interface {
+	Models(context.Context) ([]ModelInfo, error)
+}
+
 // Config carries the connection settings a factory needs to build a Provider.
 type Config struct {
 	APIKey  string

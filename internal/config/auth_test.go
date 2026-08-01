@@ -71,3 +71,24 @@ func TestBuildProviderNeverSendsManagedLoginToCustomBaseURL(t *testing.T) {
 		t.Fatalf("BuildProvider error = %v; want explicit credential requirement", err)
 	}
 }
+
+func TestBuildGitHubCopilotProviderFromEnvironmentToken(t *testing.T) {
+	cfg := &Config{Provider: "copilot", Model: "auto", APIKey: "github-token"}
+	p, err := cfg.BuildProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name() != "github-copilot" {
+		t.Fatalf("provider name = %q", p.Name())
+	}
+}
+
+func TestBuildGitHubCopilotRequiresLogin(t *testing.T) {
+	registry := providerAuth.NewRegistry()
+	store := providerAuth.NewStore(filepath.Join(t.TempDir(), "auth.json"))
+	cfg := &Config{Provider: "github-copilot", Model: "auto", AuthService: providerAuth.NewService(registry, store)}
+	_, err := cfg.BuildProvider()
+	if err == nil || !strings.Contains(err.Error(), "auth login github-copilot") {
+		t.Fatalf("BuildProvider error = %v", err)
+	}
+}

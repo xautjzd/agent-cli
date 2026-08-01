@@ -125,6 +125,9 @@ type Repl struct {
 	// VisionClient overrides the lazily built vision-fallback provider
 	// (primarily a test seam).
 	VisionClient provider.Provider
+	// dynamicModels caches account-specific model catalogs. Completion is
+	// synchronous, so providers refresh this cache when they are activated.
+	dynamicModels map[string][]provider.ModelInfo
 
 	scanner *bufio.Scanner
 	useTUI  bool
@@ -236,6 +239,7 @@ func init() {
 // (so "/commit-helper" works like in Claude Code); anything else is a user
 // prompt whose @path references are expanded before hitting the agent.
 func (r *Repl) Run(ctx context.Context) error {
+	_ = r.refreshProviderModels(ctx, r.Agent.Provider, r.Cfg.Provider)
 	// The full-screen TUI needs a real terminal; piped stdin falls back to the
 	// plain line loop so scripts and tests keep working.
 	r.useTUI = isTerminal(r.In)
@@ -931,10 +935,17 @@ func (r *Repl) cmdHelp(_ context.Context, _ string) error {
 	return nil
 }
 
-func (r *Repl) cmdModel(_ context.Context, args string) error {
+func (r *Repl) cmdModel(ctx context.Context, args string) error {
 	if args == "" {
+		if err := r.refreshProviderModels(ctx, r.Agent.Provider, r.Cfg.Provider); err != nil {
+			fmt.Fprintln(r.Out, "warning: could not refresh provider models:", err)
+		}
 		fmt.Fprintf(r.Out, "model: %s (provider %s)\n", r.Cfg.Model, r.Cfg.Provider)
-		if models := catalog.ModelsFor(r.Cfg.Provider); len(models) > 0 {
+		if options := r.modelOptions(r.Cfg.Provider); len(options) > 0 {
+			models := make([]string, 0, len(options))
+			for _, option := range options {
+				models = append(models, option[0])
+			}
 			fmt.Fprintf(r.Out, "known models: %s\n", strings.Join(models, ", "))
 			fmt.Fprintln(r.Out, "(any model the provider accepts works — this list is only a hint)")
 		}
@@ -967,7 +978,7 @@ func (r *Repl) cmdModel(_ context.Context, args string) error {
 
 // cmdProvider rebuilds the provider client and re-resolves credentials for
 // the new vendor, keeping conversation history intact.
-func (r *Repl) cmdProvider(_ context.Context, args string) error {
+func (r *Repl) cmdProvider(ctx context.Context, args string) error {
 	if args == "" {
 		return r.listProviders()
 	}
@@ -1011,6 +1022,9 @@ func (r *Repl) cmdProvider(_ context.Context, args string) error {
 			return err
 		}
 		r.offerSaveProviderKey(cfg.Provider, cfg.Format, key)
+	}
+	if err := r.refreshProviderModels(ctx, p, cfg.Provider); err != nil {
+		fmt.Fprintln(r.Out, "warning: could not refresh provider models:", err)
 	}
 	r.Agent.SetProvider(p, cfg.Model)
 	r.Cfg = cfg

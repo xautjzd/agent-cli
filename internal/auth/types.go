@@ -69,6 +69,13 @@ type LoginUI interface {
 	Notify(string)
 }
 
+// SecretPrompter is an optional LoginUI capability for adapters that accept a
+// manually supplied token. Adapters must fail closed rather than fall back to
+// an echoing prompt when it is unavailable.
+type SecretPrompter interface {
+	PromptSecret(context.Context, string) (string, error)
+}
+
 // ResolvedAuth is ephemeral request authentication. Secret is never persisted
 // through this type; Properties contains non-secret routing metadata such as a
 // workspace or account ID.

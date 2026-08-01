@@ -10,6 +10,7 @@ import (
 	"time"
 
 	providerAuth "github.com/xautjzd/agent-cli/internal/auth"
+	"github.com/xautjzd/agent-cli/internal/catalog"
 )
 
 type replLoginUI struct {
@@ -73,6 +74,14 @@ func (ui replLoginUI) OpenURL(ctx context.Context, url string) error {
 
 func (ui replLoginUI) Prompt(_ context.Context, label string) (string, error) {
 	answer, ok := ui.repl.readInput(label + ": ")
+	if !ok {
+		return "", fmt.Errorf("cancelled")
+	}
+	return strings.TrimSpace(answer), nil
+}
+
+func (ui replLoginUI) PromptSecret(_ context.Context, label string) (string, error) {
+	answer, ok := ui.repl.readSecret(label + ": ")
 	if !ok {
 		return "", fmt.Errorf("cancelled")
 	}
@@ -171,7 +180,13 @@ func (r *Repl) cmdLogin(ctx context.Context, args string) error {
 		fmt.Fprintf(r.Out, " as %s", status.Account)
 	}
 	fmt.Fprintln(r.Out)
-	if r.Cfg.Provider != providerID {
+	if _, builtIn := catalog.Lookup(providerID); builtIn {
+		// Rebuild even when this provider is already active: a re-login may
+		// have changed accounts or rotated the provider's credential source.
+		if err := r.cmdProvider(ctx, providerID); err != nil {
+			return fmt.Errorf("logged in, but could not activate %s: %w", providerID, err)
+		}
+	} else if r.Cfg.Provider != providerID {
 		fmt.Fprintf(r.Out, "Switch to it with /provider %s\n", providerID)
 	}
 	return nil

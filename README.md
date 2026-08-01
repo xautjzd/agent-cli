@@ -106,6 +106,7 @@ Requires **Go 1.22+**. The result is a single static binary.
 ```bash
 # 1. Pick a provider — no vendor is assumed
 agent provider list                                              # see them all
+agent auth login github-copilot                                  # use a Copilot subscription
 agent provider use anthropic                                     # persists the choice
 # …or export one for this shell only:
 export AGENT_PROVIDER=openai   OPENAI_API_KEY=sk-...

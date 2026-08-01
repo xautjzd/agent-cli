@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	providerAuth "github.com/xautjzd/agent-cli/internal/auth"
+	githubCopilotAuth "github.com/xautjzd/agent-cli/internal/auth/githubcopilot"
 	openAIAuth "github.com/xautjzd/agent-cli/internal/auth/openai"
 	"github.com/xautjzd/agent-cli/internal/catalog"
 	"github.com/xautjzd/agent-cli/internal/home"
@@ -380,6 +381,7 @@ func LoadIn(projectDir string) (*Config, error) {
 func defaultAuthService() *providerAuth.Service {
 	registry := providerAuth.NewRegistry()
 	_ = registry.Register(openAIAuth.New())
+	_ = registry.Register(githubCopilotAuth.New())
 	return providerAuth.NewService(registry, providerAuth.DefaultStore())
 }
 
@@ -391,6 +393,22 @@ func (s openAIAuthSource) Auth(ctx context.Context) (provider.RequestAuth, error
 		return provider.RequestAuth{}, err
 	}
 	return provider.RequestAuth{Token: resolved.Secret, AccountID: resolved.Properties["account_id"]}, nil
+}
+
+type githubCopilotAuthSource struct{ service *providerAuth.Service }
+
+func (s githubCopilotAuthSource) Auth(ctx context.Context) (provider.RequestAuth, error) {
+	resolved, err := s.service.Resolve(ctx, githubCopilotAuth.ProviderID)
+	if err != nil {
+		return provider.RequestAuth{}, err
+	}
+	return provider.RequestAuth{Token: resolved.Secret}, nil
+}
+
+type tokenAuthSource string
+
+func (s tokenAuthSource) Auth(context.Context) (provider.RequestAuth, error) {
+	return provider.RequestAuth{Token: string(s)}, nil
 }
 
 // DefaultContextLimit is the fallback context window (tokens) used when the
@@ -973,6 +991,21 @@ func (c *Config) BuildProvider() (provider.Provider, error) {
 		} else if loggedIn {
 			return provider.NewOpenAICodex(openAIAuthSource{service: service}, pc)
 		}
+	}
+	if preset, _, ok := catalog.Resolve(c.Provider); ok && preset.Name == githubCopilotAuth.ProviderID {
+		if pc.APIKey != "" {
+			return provider.NewGitHubCopilot(tokenAuthSource(pc.APIKey), pc)
+		}
+		service := c.AuthService
+		if service == nil {
+			service = defaultAuthService()
+		}
+		if loggedIn, err := service.HasCredential(githubCopilotAuth.ProviderID); err != nil {
+			return nil, err
+		} else if !loggedIn {
+			return nil, fmt.Errorf("provider github-copilot needs a credential: run \"agent auth login github-copilot\"")
+		}
+		return provider.NewGitHubCopilot(githubCopilotAuthSource{service: service}, pc)
 	}
 	if p, wire, ok := catalog.Resolve(c.Provider); ok {
 		// A legacy "<vendor>-anthropic" name carries its own wire, so it
