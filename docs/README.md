@@ -12,10 +12,10 @@ Each guide is split into a **Usage** part (how to drive the feature) and a
 - [Getting started](getting-started.md) — install, first run, quick start.
 - [Automatic updates](automatic-updates.md) — startup checks, update choices, verification, and opt-out.
 - [Configuration](configuration.md) — precedence, files, every config key, `agent config`, and the `/config` panel.
-- [Providers & models](providers.md) — built-in provider presets, named profiles, the Anthropic Messages API, third-party gateways, and prompt caching.
+- [Providers & models](providers.md) — built-in provider presets, named profiles, managed subscription login, the Anthropic Messages API, third-party gateways, and prompt caching.
 
 ### Interactive use
-- [Interactive session](interactive-session.md) — the full-screen TUI, keybindings, the full slash-command reference, and output rendering.
+- [Interactive session](interactive-session.md) — the full-screen TUI, keybindings, slash commands, activity views, and output rendering.
 - [File references & vision](file-references-and-vision.md) — `@path` inlining, `Ctrl+V` image paste, and vision-capability routing.
 - [Sessions & resume](sessions.md) — auto-saved history, `/resume`, `/rename`, and where transcripts live.
 - [Themes](themes.md) — built-in color themes and live `/theme` switching.
@@ -38,4 +38,4 @@ Each guide is split into a **Usage** part (how to drive the feature) and a
 
 ### Automation
 - [Non-interactive mode](non-interactive.md) — `agent -p`, CI, and GitHub Actions PR review.
-- [Usage & cost tracking](usage-and-cost.md) — `/usage`, models.dev pricing, and price overrides.
+- [Usage & cost tracking](usage-and-cost.md) — cross-project `/usage`, live subscription limits, models.dev pricing, and price overrides.

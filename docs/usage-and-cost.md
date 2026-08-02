@@ -2,17 +2,22 @@
 
 `/usage` reports two intentionally separate kinds of information:
 
-1. local token consumption and **estimated API cost** — all-time for the project,
-   broken down by model/provider, plus the current session;
+1. local token consumption and **estimated API cost** — all-time across every
+   project under the current agent home, broken down by model/provider, plus the
+   current session;
 2. freshly fetched subscription limits for the active managed-login provider,
    when that provider exposes them.
+
+The local report is machine-wide for the current agent home. It combines each
+project's stored usage without mixing it with another agent home or with live
+provider entitlements.
 
 The second section is provider-reported entitlement data, not inferred dollar
 cost. Use `/usage openai` or `agent auth usage openai` to request only live OpenAI
 subscription usage.
 
 ```
-Usage · this project · all time
+Usage · all projects · all time
 
   Total cost    $401.23
   Tokens        1.1m  (27.1k in · 1.0m out)
@@ -42,10 +47,17 @@ keeps the local report and shows a non-fatal availability note.
 
 ## Where totals live
 
-Totals accumulate to `<agent-home>/projects/<encoded>/usage.json`, so "total
-consumed" survives restarts. **Subagent** turns count toward the totals too (shared
-recorder). It's per-project, matching where [sessions](sessions.md) and the audit
-log live.
+Each project accumulates totals in its own
+`<agent-home>/projects/<encoded>/usage.json`, so usage survives restarts while
+writes remain isolated between projects. **Subagent** turns count toward the
+project total too because they use the shared recorder.
+
+When `/usage` renders the local report, it discovers every valid `usage.json`
+under `<agent-home>/projects/` and merges entries with the same provider/model.
+Missing or corrupt files contribute nothing rather than failing the report. The
+result is therefore an all-project view, while the underlying history remains
+stored per project alongside [sessions](sessions.md) and the audit log.
+
 
 ## Where prices come from
 

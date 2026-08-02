@@ -31,9 +31,10 @@ Interactive aliases use the same registry and command handlers:
 /usage
 ```
 
-`/auth` lists safe authentication status. `/usage` keeps the existing local
-per-project token history and, when the active provider exposes live
-subscription usage, appends a separately labelled live section.
+`/auth` lists safe authentication status. `/usage` aggregates the local token
+history stored by every project under the current agent home and, when the active
+provider exposes live subscription usage, appends a separately labelled live
+section. The underlying usage files remain isolated per project.
 
 With OpenAI and GitHub Copilot subscription auth implemented, an omitted provider
 opens the provider picker, then the selected adapter asks for its supported login

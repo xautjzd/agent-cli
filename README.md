@@ -82,10 +82,15 @@ use the same directory.
   zero-config presets for common vendors and custom endpoints you define yourself;
   switch mid-session with `/provider`, and reasoning effort follows what each model
   actually accepts.
+- **Provider subscriptions** — managed login for OpenAI ChatGPT/Codex and GitHub
+  Copilot, with subscription-specific model availability and live OpenAI usage limits;
+  API-key credentials and billing remain separate.
 - **Permissions & sandbox** — an evasion-resistant risk classifier, per-tool/path/command
   approval rules, an optional command sandbox, and a structured audit log.
 - **Sessions, plan mode & goals** — auto-saved resumable history, read-only planning,
   goal-directed autonomy, undo via `/rewind`, and automatic context compaction.
+- **Activity & sharing** — cross-project `/stats` and `/usage` summaries, live
+  in-progress token estimates, and clean transcript export with `/copy`.
 - **Extensible** — `SKILL.md` skills, custom slash commands, project memory, MCP servers,
   and lifecycle hooks for third-party integration.
 - **Automation-ready** — a non-interactive `-p` mode for CI and PR review, plus token &
@@ -106,9 +111,15 @@ Requires **Go 1.22+**. The result is a single static binary.
 ```bash
 # 1. Pick a provider — no vendor is assumed
 agent provider list                                              # see them all
-agent auth login github-copilot                                  # use a Copilot subscription
-agent provider use anthropic                                     # persists the choice
-# …or export one for this shell only:
+agent provider use anthropic                                     # API-key provider; persists the choice
+
+# Or use a managed subscription (choose one):
+agent auth login openai                                          # ChatGPT/Codex subscription
+agent provider use openai
+# agent auth login github-copilot                                # GitHub Copilot subscription
+# agent provider use github-copilot
+
+# Or export one for this shell only:
 export AGENT_PROVIDER=openai   OPENAI_API_KEY=sk-...
 export AGENT_PROVIDER=deepseek DEEPSEEK_API_KEY=sk-...
 
@@ -132,8 +143,8 @@ Detailed usage and configuration guides live in **[`docs/`](docs/README.md)**.
 | [Getting started](docs/getting-started.md) | Install, first run, quick start |
 | [Automatic updates](docs/automatic-updates.md) | Startup checks, update choices, verification, opt-out |
 | [Configuration](docs/configuration.md) | Precedence, files, every config key, `agent config`, the `/config` panel |
-| [Providers & models](docs/providers.md) | Presets, named profiles, the Anthropic API, gateways, prompt caching |
-| [Interactive session](docs/interactive-session.md) | The TUI, keybindings, full slash-command reference, output rendering |
+| [Providers & models](docs/providers.md) | Presets, named profiles, subscription login, the Anthropic API, gateways, prompt caching |
+| [Interactive session](docs/interactive-session.md) | The TUI, keybindings, slash commands, activity views, and output rendering |
 | [File references & vision](docs/file-references-and-vision.md) | `@path` inlining, `Ctrl+V` image paste, vision routing |
 | [Sessions & resume](docs/sessions.md) | Auto-saved history, `/resume`, `/rename`, storage |
 | [Themes](docs/themes.md) | Built-in color themes and live `/theme` switching |
@@ -148,7 +159,7 @@ Detailed usage and configuration guides live in **[`docs/`](docs/README.md)**.
 | [MCP servers](docs/mcp.md) | Model Context Protocol tools and deferred loading |
 | [Hooks](docs/hooks.md) | Run external commands at lifecycle events |
 | [Non-interactive mode](docs/non-interactive.md) | `agent -p`, CI, GitHub Actions PR review |
-| [Usage & cost](docs/usage-and-cost.md) | `/usage`, models.dev pricing, price overrides |
+| [Usage & cost](docs/usage-and-cost.md) | Cross-project `/usage`, live subscription limits, models.dev pricing, price overrides |
 
 ## Architecture
 

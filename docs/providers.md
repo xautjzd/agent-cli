@@ -308,8 +308,10 @@ newer than the table in `internal/provider/thinking.go` — get low/medium/high 
 no disable switch, since guessing a field name would fail the whole request.
 - **Parallel tool calls** are preserved: every result for one assistant turn is
   sent in a single user message.
-- **Credentials** come from `ANTHROPIC_API_KEY`, the config file, or — since the
-  SDK resolves them itself — an `ant auth login` profile on disk.
+- **Credentials** come from `ANTHROPIC_API_KEY` or the config file. For
+  Anthropic-wire gateways, `ANTHROPIC_AUTH_TOKEN` is tried before the vendor's own
+  key. Managed subscription login currently applies to OpenAI and GitHub Copilot;
+  it does not replace Anthropic API keys.
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -403,8 +405,8 @@ the local model with no key needed.
 }
 ```
 
-Credentials come from `ANTHROPIC_API_KEY` (or an `ant auth login` profile) — no
-`api_key` needed in the file.
+Credentials come from `ANTHROPIC_API_KEY` or the configured credential source — no
+`api_key` is needed in the file.
 
 ### OpenAI plus DeepSeek, switchable mid-session
 

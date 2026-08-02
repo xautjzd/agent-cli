@@ -75,7 +75,9 @@ opens a numbered picker.
 | `/plan [task]` | Plan mode: explore read-only, propose a plan, implement on approval |
 | `/mode [hitl\|bypass]` | Show or switch the permission mode |
 | `/effort [level]` | Show or set reasoning effort — only the levels the active model accepts ([details](providers.md#reasoning-effort-is-per-model-not-per-vendor)) |
-| `/usage [provider]` | Local usage/cost plus separately labelled live subscription limits |
+| `/usage [provider]` | Usage/cost across all projects, plus separately labelled live subscription limits |
+| `/stats` | Open the cross-project activity overview |
+| `/copy` | Copy the clean session transcript to the system clipboard (TUI only) |
 | `/compact` | Summarize earlier turns to free up context now |
 | `/rewind` | Undo — restore files and trim the conversation to an earlier state |
 | `/rename [title]` | Rename the current session |
@@ -83,6 +85,31 @@ opens a numbered picker.
 | `/resume [id]` | Resume a previous session (picker, or jump to an ID/prefix) |
 | `/clear` | Clear history (keeps system prompt; old session stays resumable) |
 | `/exit` | Quit |
+
+### Activity overview: `/stats`
+
+`/stats` summarizes activity across all projects under the current agent home. It
+includes a trailing-year activity heatmap and headline figures such as sessions,
+active days, current and longest streaks, favorite model, longest session, and
+cumulative tokens. The summary can be viewed for **All time**, **Last 7 days**, or
+**Last 30 days**.
+
+In the full-screen TUI:
+
+- press `r` to cycle through the time ranges;
+- press `Ctrl-S` to copy the current view;
+- press `Esc`, `q`, or `Ctrl-C` to close the overview.
+
+With piped input or the plain REPL, `/stats` prints the all-time overview once.
+If there is no recorded activity, it reports that no activity is available yet.
+
+### Copying a transcript: `/copy`
+
+In the full-screen TUI, `/copy` writes the current session transcript to the
+system clipboard as clean plain text. It omits terminal color codes, the startup
+banner, and the `/copy` command itself. An empty session has nothing to copy, and
+plain or piped sessions do not provide this command because they do not retain a
+managed transcript buffer.
 
 Example session:
 
@@ -107,6 +134,14 @@ Only `write_file` / `edit_file` edits are snapshotted; file changes made by `bas
 (`rm`, `>`, `sed -i`) are **not** captured.
 
 ## Output rendering
+
+While a turn is running, the footer remains stable and shows a live status such as
+`✻ working… · ~1,248 tokens consumed`. This number is a UI estimate: it starts from
+the latest known context plus the submitted input and continues to advance while
+the provider is waiting, thinking, or not emitting stream data. The provider's
+final usage is authoritative and replaces the estimate in the completed-turn
+statistics. Press `Esc` twice within one second or press `Ctrl-C` to interrupt;
+the conversation is kept so you can add more and continue.
 
 - **Streaming** — assistant text and thinking arrive token by token over SSE (with
   `stream_options.include_usage`, so token stats stay accurate). Providers or

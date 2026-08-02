@@ -72,7 +72,7 @@ func TestUsageCommandAggregatesAllProjects(t *testing.T) {
 	r.printLocalUsage()
 	got := stripANSI(out.String())
 	for _, want := range []string{
-		"Usage · this PC · all projects · all time",
+		"Usage · all projects · all time",
 		"Tokens        410",
 		"Requests      3",
 		"gpt-5.6-sol",
